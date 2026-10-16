@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>M-Team Downloader</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>M-Team Downloader</h1>
+        <p>搜索资源，选择目录，提交到你的 qBittorrent。</p>
+      </div>
+      <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a>
+    </header>
+    <div id="notice" role="status" hidden></div>
+    <main>
+      <section id="login-panel" class="card" hidden>
+        <h2>登录控制台</h2>
+        <p class="muted">
+          使用部署时设置的管理员密码。AI 请使用独立 API 令牌。
+        </p>
+        <form id="login-form">
+          <label
+            >管理员密码<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required /></label
+          ><button type="submit">登录</button>
+        </form>
+      </section>
+      <div id="application" hidden>
+        <nav>
+          <button data-tab="search" class="active">资源搜索</button
+          ><button data-tab="jobs">提交记录</button
+          ><button data-tab="settings">连接与目录</button
+          ><button data-tab="tokens">API 令牌</button
+          ><button id="logout" class="quiet">退出登录</button>
+        </nav>
+        <section id="search-panel" class="card tab-panel">
+          <form id="search-form" class="search-bar">
+            <input
+              name="keyword"
+              placeholder="资源名称 / IMDb ID"
+              maxlength="200"
+              required
+              aria-label="搜索关键词"
+            /><label class="check"
+              ><input type="checkbox" name="free_only" />站点免费筛选</label
+            ><button type="submit">搜索</button>
+          </form>
+          <p class="muted">
+            站点优惠可能变化，提交前请核对。首次使用请先配置连接信息。
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>资源</th>
+                  <th>大小</th>
+                  <th>做种 / 下载</th>
+                  <th>优惠</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="results">
+                <tr>
+                  <td colspan="5" class="muted">输入关键词开始搜索</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="prev-page" class="secondary" disabled>上一页</button
+            ><span id="page-label">第 1 页</span
+            ><button id="next-page" class="secondary" disabled>下一页</button>
+          </div>
+        </section>
+        <section id="jobs-panel" class="card tab-panel" hidden>
+          <div class="section-title">
+            <h2>最近提交</h2>
+            <button id="refresh-jobs" class="secondary">刷新</button>
+          </div>
+          <p class="muted">
+            “已添加”不等于下载完成；待确认的任务不会自动重新提交。点击“查看”可核对下载器实时状态。
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>资源 / 时间</th>
+                  <th>保存目录</th>
+                  <th>状态</th>
+                  <th>说明</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="jobs"></tbody>
+            </table>
+          </div>
+          <p id="jobs-count" class="muted"></p>
+          <pre id="job-detail" hidden></pre>
+        </section>
+        <section id="settings-panel" class="tab-panel" hidden>
+          <div class="card">
+            <h2>连接设置</h2>
+            <p class="muted">
+              密钥与密码加密保存，不会回显。留空保留已有值。更换前请等待排队任务处理完。
+            </p>
+            <form id="settings-form" class="grid-form">
+              <label
+                >M-Team 网页地址<input name="site_url" type="url" required
+              /></label>
+              <label
+                >M-Team API 地址<input name="site_api_url" type="url" required
+              /></label>
+              <label
+                >M-Team API Key<input
+                  name="site_api_key"
+                  type="password"
+                  autocomplete="new-password"
+              /></label>
+              <label
+                >qBittorrent WebUI 地址<input
+                  name="qb_url"
+                  type="url"
+                  placeholder="http://192.168.1.10:8080"
+                  required
+              /></label>
+              <label
+                >qBittorrent 用户名<input
+                  name="qb_username"
+                  autocomplete="off"
+                  required
+              /></label>
+              <label
+                >qBittorrent 密码<input
+                  name="qb_password"
+                  type="password"
+                  autocomplete="new-password"
+              /></label>
+              <label
+                >下载标签<input name="download_tag" maxlength="100"
+              /></label>
+              <label class="check"
+                ><input name="qb_verify_tls" type="checkbox" />验证 qBittorrent
+                HTTPS 证书（推荐）</label
+              >
+              <div class="actions full">
+                <button type="submit">保存连接设置</button
+                ><button type="button" id="test-mteam" class="secondary">
+                  测试已保存的 M-Team</button
+                ><button type="button" id="test-qb" class="secondary">
+                  测试已保存的 qBittorrent
+                </button>
+              </div>
+            </form>
+            <pre id="connection-result" hidden></pre>
+          </div>
+          <div class="card">
+            <div class="section-title">
+              <h2>保存目录预设</h2>
+              <button id="add-location" class="secondary">添加目录</button>
+            </div>
+            <p class="muted">
+              填写 qBittorrent 容器内的绝对路径，例如
+              /downloads。应用不访问这些目录，也不验证远端写入权限。
+            </p>
+            <form id="locations-form">
+              <div id="location-rows"></div>
+              <button type="submit">保存目录预设</button>
+            </form>
+          </div>
+        </section>
+        <section id="tokens-panel" class="card tab-panel" hidden>
+          <h2>AI / 自动化访问令牌</h2>
+          <p class="muted">
+            令牌仅在创建时显示一次。它不能修改设置、管理其他令牌或删除下载文件。
+          </p>
+          <form id="token-form" class="token-form">
+            <label
+              >名称<input
+                name="name"
+                placeholder="例如：我的 AI 助手"
+                maxlength="100"
+                required /></label
+            ><label
+              >有效天数<input
+                name="days"
+                type="number"
+                value="30"
+                min="1"
+                max="365"
+                required
+            /></label>
+            <div class="scopes">
+              <label class="check"
+                ><input
+                  type="checkbox"
+                  name="scopes"
+                  value="search:read"
+                  checked
+                />搜索资源</label
+              ><label class="check"
+                ><input
+                  type="checkbox"
+                  name="scopes"
+                  value="downloads:read"
+                  checked
+                />目录与状态查询</label
+              ><label class="check"
+                ><input
+                  type="checkbox"
+                  name="scopes"
+                  value="downloads:create"
+                />添加下载</label
+              >
+            </div>
+            <button type="submit">创建令牌</button>
+          </form>
+          <pre id="new-token" hidden></pre>
+          <div id="token-list"></div>
+        </section>
+      </div>
+    </main>
+    <dialog id="download-dialog">
+      <form id="download-form">
+        <h2>添加下载</h2>
+        <p id="download-title"></p>
+        <label>保存目录<select name="location_id" required></select></label
+        ><label class="check"
+          ><input type="checkbox" name="start_paused" />添加后暂停</label
+        >
+        <p class="muted">
+          仅添加任务，不会修改已有同种任务。网络异常后可用同一次操作重试。
+        </p>
+        <div class="actions">
+          <button type="submit">确认添加</button
+          ><button type="button" id="cancel-download" class="secondary">
+            取消
+          </button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

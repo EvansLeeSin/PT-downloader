@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.env
+.env.*
+!.env.example
+data/
+secrets/
+.coverage
+htmlcov/
+node_modules/
+playwright-report/
+test-results/

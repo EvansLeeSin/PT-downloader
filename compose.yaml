@@ -1,0 +1,25 @@
+services:
+  mteam-downloader:
+    build: .
+    image: mteam-downloader:local
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8088}:8080"
+    environment:
+      APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?请在 .env 中设置至少 12 位管理员密码}"
+      APP_DATA_DIR: /app/data
+      TZ: Asia/Shanghai
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 2m
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  app-data:
