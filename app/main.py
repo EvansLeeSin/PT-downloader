@@ -42,7 +42,7 @@ from app.models import (
     TokenCreate,
     Torrent,
 )
-from app.service import DownloadWorker, SearchService, public_job
+from app.service import DownloadWorker, SearchService, public_download_status, public_job
 from app.store import Store
 
 STATIC = Path(__file__).parent / "static"
@@ -318,6 +318,69 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
         owner = "admin" if identity["kind"] == "session" else identity["id"]
         return public_job(request.app.state.store.create_job(owner, idempotency_key, payload))
 
+    def live_downloads(store, jobs):
+        results = [dict(public_job(job), download_status=None, live_error=None) for job in jobs]
+        eligible = [
+            (job, result)
+            for job, result in zip(jobs, results, strict=True)
+            if job["expected_hashes"]
+            and job["submission_status"] in ("added", "exists", "uncertain")
+        ]
+        if not eligible:
+            return results
+        config = store.settings()
+        pending = []
+        for job, result in eligible:
+            if config.qb_url != job["qb_url"]:
+                result["live_error"] = {
+                    "code": "DOWNLOADER_CHANGED",
+                    "message": "下载器地址已变更，仅显示原提交记录",
+                }
+            else:
+                pending.append((job, result))
+        if not pending:
+            return results
+        client = None
+        try:
+            client = QbClient(config)
+            client.connect()
+            hashes = {value for job, _ in pending for value in json.loads(job["expected_hashes"])}
+            found = client.find_many(hashes)
+            for job, result in pending:
+                torrent = next(
+                    (
+                        found[value]
+                        for value in json.loads(job["expected_hashes"])
+                        if value in found
+                    ),
+                    None,
+                )
+                if torrent:
+                    result["download_status"] = public_download_status(torrent)
+                else:
+                    result["live_error"] = {
+                        "code": "TORRENT_NOT_FOUND",
+                        "message": "下载器当前未找到该任务；不会自动重新添加",
+                    }
+        except AppError as exc:
+            for _, result in pending:
+                result["live_error"] = {"code": exc.code, "message": exc.message}
+        finally:
+            if client:
+                client.close()
+        return results
+
+    @application.delete(
+        "/api/v1/downloads/{job_id}",
+        status_code=204,
+        tags=["下载"],
+        dependencies=[Depends(require_scope("downloads:delete"))],
+        summary="仅删除提交记录，不删除下载器任务或文件",
+    )
+    def delete_download(job_id: str, request: Request):
+        request.app.state.store.delete_job(job_id)
+        return Response(status_code=204)
+
     @application.get(
         "/api/v1/downloads",
         response_model=DownloadList,
@@ -328,9 +391,12 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
         request: Request,
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
         offset: Annotated[int, Query(ge=0)] = 0,
+        include_live: bool = False,
     ):
-        jobs, total = request.app.state.store.jobs(limit, offset)
-        return {"items": [public_job(job) for job in jobs], "total": total}
+        store = request.app.state.store
+        jobs, total = store.jobs(limit, offset)
+        items = live_downloads(store, jobs) if include_live else [public_job(job) for job in jobs]
+        return {"items": items, "total": total}
 
     @application.get(
         "/api/v1/downloads/{job_id}",
@@ -361,19 +427,7 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
                 if job["submission_status"] == "uncertain":
                     request.app.state.worker._confirmed(job, found, already_exists=False)
                     result.update(public_job(store.job(job_id)))
-                result["download_status"] = {
-                    key: found.get(key)
-                    for key in (
-                        "name",
-                        "state",
-                        "progress",
-                        "dlspeed",
-                        "upspeed",
-                        "size",
-                        "amount_left",
-                        "save_path",
-                    )
-                }
+                result["download_status"] = public_download_status(found)
             else:
                 result["live_error"] = {
                     "code": "TORRENT_NOT_FOUND",

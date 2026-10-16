@@ -90,20 +90,26 @@ class QbClient:
                 "DOWNLOADER_QUERY_FAILED", "已登录但无法读取 qBittorrent 信息", 502
             ) from exc
 
-    def find(self, hashes: set[str]):
+    def find_many(self, hashes: set[str]) -> dict[str, dict]:
+        if not hashes:
+            return {}
         try:
-            # Full v2 and truncated v2 identities can differ across client versions.
+            # One filtered POST for the page, including v1/v2/hybrid identities.
             torrents = self.client.torrents_info(torrent_hashes="|".join(sorted(hashes)))
+            found = {}
             for torrent in torrents:
                 candidates = {
                     str(torrent.get(key) or "").lower()
                     for key in ("hash", "infohash_v1", "infohash_v2")
                 }
-                if hashes.intersection(candidates):
-                    return dict(torrent)
-            return None
+                for matched in hashes.intersection(candidates):
+                    found[matched] = dict(torrent)
+            return found
         except Exception as exc:
             raise AppError("DOWNLOADER_QUERY_FAILED", "无法核对 qBittorrent 任务状态", 502) from exc
+
+    def find(self, hashes: set[str]):
+        return next(iter(self.find_many(hashes).values()), None)
 
     def add(self, content: bytes, save_path: str, paused: bool):
         # Return shape may be legacy text or structured metadata. The worker

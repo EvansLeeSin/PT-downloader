@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Scope = Literal["search:read", "downloads:read", "downloads:create"]
+Scope = Literal["search:read", "downloads:read", "downloads:create", "downloads:delete"]
 SearchMode = Literal["normal", "adult"]
 
 
@@ -97,7 +97,7 @@ class Login(StrictModel):
 
 class TokenCreate(StrictModel):
     name: str = Field(min_length=1, max_length=100)
-    scopes: list[Scope] = Field(min_length=1, max_length=3)
+    scopes: list[Scope] = Field(min_length=1, max_length=4)
     expires_in_days: int = Field(default=30, ge=1, le=365)
 
 
@@ -155,11 +155,6 @@ class DownloadJob(StrictModel):
     updated_at: float = Field(description="Unix timestamp in seconds")
 
 
-class DownloadList(StrictModel):
-    items: list[DownloadJob]
-    total: int
-
-
 class LiveError(StrictModel):
     code: str
     message: str
@@ -179,6 +174,11 @@ class LiveStatus(StrictModel):
 class DownloadDetail(DownloadJob):
     download_status: LiveStatus | None = None
     live_error: LiveError | None = None
+
+
+class DownloadList(StrictModel):
+    items: list[DownloadDetail]
+    total: int
 
 
 class ValidationField(StrictModel):

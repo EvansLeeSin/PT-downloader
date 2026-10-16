@@ -15,8 +15,9 @@ Authorization: Bearer mtd_...
 | `search:read` | 搜索、资源详情 |
 | `downloads:read` | 目录列表、提交记录、实时状态 |
 | `downloads:create` | 添加下载 |
+| `downloads:delete` | 删除本应用提交记录，不删除下载器任务或文件 |
 
-全流程 AI 一般需要这三个权限。没有“下载创建”权限的助手无法添加任务。令牌默认 30 天有效，可配置 1–365 天，管理员可以撤销。不要把令牌放在 URL 参数中。
+检索和下载的完整流程一般需要前三个权限。删除记录独立授权，网页创建令牌时默认不勾选；旧令牌不会自动获得此权限。没有“下载创建”权限的助手无法添加任务。令牌默认 30 天有效，可配置 1–365 天，管理员可以撤销。不要把令牌放在 URL 参数中。
 
 管理员浏览器使用 HttpOnly、SameSite=Strict 会话 Cookie；写请求校验同源 Origin。管理接口不接受 API 令牌。API 调用不依赖 Cookie，也不要求 Origin。无跨域浏览器 CORS 开放；外部 AI 应通过服务端 HTTP 工具调用。
 
@@ -184,7 +185,33 @@ GET /downloads/f8b91e3b0e194ef6a4468e5b21798dea
 GET /downloads?limit=20&offset=0
 ```
 
-返回 `{"items": [提交记录], "total": 记录数}`。`limit` 为 1–100，按创建时间倒序。不逐项请求下载器，适合轮询队列状态。单用户应用内，具备读取权限的令牌可查看所有提交记录。
+返回 `{"items": [提交记录], "total": 可见记录数}`。`limit` 为 1–100，按创建时间倒序，已删除记录不参与列表或计数。单用户应用内，具备读取权限的令牌可查看所有未删除的提交记录。
+
+- `include_live=false`（默认）：只读本地记录，不连接下载器，适合轮询队列。
+- `include_live=true`：为已添加、已存在或待确认且已保存 hash 的记录附加 `download_status` / `live_error`，字段与详情接口相同。每页复用一次下载器连接并批量查询 hash，不逐条登录查询；不包含下载器全部任务。
+- 下载器离线、任务不存在或已切换下载器时，保留提交记录并返回 `live_error`，不会将进度伪装成 0%，也不会重新添加任务。
+- 列表查询不修改待确认记录；如需核对并补全确认信息，使用单条详情接口。
+- 网页在记录页打开时约每 5 秒刷新，慢请求不会叠加。`progress` 为 0–1（例如 `0.5` 为 50%），可结合 `state`、`dlspeed` 和 `amount_left` 展示进度、速度与剩余大小。
+
+```http
+GET /downloads?limit=50&offset=0&include_live=true
+```
+
+## 7. 删除提交记录
+
+```http
+DELETE /downloads/f8b91e3b0e194ef6a4468e5b21798dea
+Authorization: Bearer mtd_...
+```
+
+需要 `downloads:delete` 权限或管理员会话，成功返回 **204**，没有响应正文。
+
+- **只清理本应用记录，不删除、停止或更改 qBittorrent 任务，也不删除文件。**
+- `queued` / `processing` 期间返回 `409 JOB_ACTIVE`，不可借删除操作取消队列或打断正在提交的任务。
+- `uncertain` 可删除，但删除不代表任务没有提交成功；请先核对下载器。
+- 删除后详情返回 `404 JOB_NOT_FOUND`，再次删除也返回 404。
+- 内部保留幂等凭据，防止旧请求重放产生新下载。同一身份用已删除记录的原幂等键及原请求重试会返回 **409 `JOB_DELETED`**；不会恢复记录或重新入队。
+- 与读取范围相同，这是单用户应用的共享记录清理权限；授予令牌该权限即可删除其他令牌创建的可见记录。
 
 ## 错误格式
 
@@ -204,14 +231,14 @@ HTTP 错误和任务内部错误是两层：请求入队失败返回 HTTP 错误
 - `401`：未登录、令牌无效/已过期/已撤销。
 - `403`：权限不足或浏览器来源校验失败。
 - `404`：目录、任务或服务不存在。
-- `409`：未配置、幂等键冲突、连接配置仍被排队任务使用。
+- `409`：未配置、幂等键冲突、记录已删除、试图删除排队/提交中记录、连接配置仍被排队任务使用。
 - `422`：参数格式错误。
 - `429`：应用或站点限流。可参考 `Retry-After`，有界退避，不要紧密循环。
 - `502`：站点或下载器连接/接口异常。
 
 常见业务错误码：
 
-`SITE_AUTH_FAILED`, `SITE_API_ERROR`, `SITE_RATE_LIMITED`, `SITE_UNREACHABLE`, `INVALID_TORRENT`, `UNTRUSTED_DOWNLOAD_URL`, `DOWNLOADER_AUTH_FAILED`, `DOWNLOADER_UNREACHABLE`, `DOWNLOADER_QUERY_FAILED`, `SUBMISSION_UNCONFIRMED`, `PROCESS_RESTARTED`, `IDEMPOTENCY_CONFLICT`, `QUEUE_FULL`。
+`SITE_AUTH_FAILED`, `SITE_API_ERROR`, `SITE_RATE_LIMITED`, `SITE_UNREACHABLE`, `INVALID_TORRENT`, `UNTRUSTED_DOWNLOAD_URL`, `DOWNLOADER_AUTH_FAILED`, `DOWNLOADER_UNREACHABLE`, `DOWNLOADER_QUERY_FAILED`, `SUBMISSION_UNCONFIRMED`, `PROCESS_RESTARTED`, `IDEMPOTENCY_CONFLICT`, `QUEUE_FULL`, `JOB_ACTIVE`, `JOB_DELETED`, `JOB_NOT_FOUND`。
 
 ## 建议的 AI 工具划分
 
@@ -222,5 +249,7 @@ HTTP 错误和任务内部错误是两层：请求入队失败返回 HTTP 错误
 3. `list_download_locations()`：只读。
 4. `add_download(resource_id, location_id, start_paused, idempotency_key)`：有副作用。
 5. `get_download_status(job_id, include_live)`：只读核对。
+
+可选的 `delete_submission_record(job_id)` 仅在确有需要时单独提供，并授予 `downloads:delete`；它不控制下载器或文件。
 
 是否在第 4 步前要求人工确认，由你的 AI 平台策略决定。管理员令牌创建、配置修改、删除文件等不应暴露给模型。

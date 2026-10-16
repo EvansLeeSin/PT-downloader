@@ -248,13 +248,72 @@ formAction("#download-form", async (form) => {
   notice(result.message);
   await tab("jobs");
 });
-async function loadJobs() {
-  const data = await api("/downloads?limit=50");
+let jobsLoading = null;
+function loadJobs() {
+  // Slow downloader requests must not overlap on the five-second timer.
+  if (!jobsLoading)
+    jobsLoading = fetchJobs().finally(() => {
+      jobsLoading = null;
+    });
+  return jobsLoading;
+}
+function downloadProgress(job) {
+  const cell = element("td", undefined, "download-progress");
+  const live = job.download_status;
+  if (!live) {
+    cell.append(element("span", job.live_error ? "进度暂不可用" : "—"));
+    if (job.live_error)
+      cell.append(element("p", job.live_error.message, "muted"));
+    return cell;
+  }
+  const states = {
+    downloading: "下载中",
+    stalledDL: "等待下载",
+    metaDL: "获取元数据",
+    queuedDL: "等待下载",
+    forcedDL: "强制下载中",
+    allocating: "分配空间",
+    pausedDL: "已暂停",
+    stoppedDL: "已暂停",
+    checkingDL: "校验中",
+    uploading: "做种中",
+    stalledUP: "做种中",
+    forcedUP: "强制做种中",
+    pausedUP: "已完成（暂停）",
+    stoppedUP: "已完成（暂停）",
+    queuedUP: "等待做种",
+    checkingUP: "校验中",
+    checkingResumeData: "检查恢复数据",
+    moving: "移动文件中",
+    error: "下载器错误",
+    missingFiles: "文件缺失",
+  };
+  cell.append(element("span", states[live.state] || live.state || "状态未知"));
+  if (Number.isFinite(live.progress)) {
+    const fraction = Math.max(0, Math.min(1, live.progress));
+    cell.append(element("span", ` · ${(fraction * 100).toFixed(1)}%`));
+    const bar = element("progress");
+    bar.max = 1;
+    bar.value = fraction;
+    bar.setAttribute("aria-label", "下载进度");
+    cell.append(bar);
+  }
+  const summary = [];
+  if (Number.isFinite(live.dlspeed)) summary.push(size(live.dlspeed) + "/s");
+  if (Number.isFinite(live.amount_left))
+    summary.push("剩余 " + size(live.amount_left));
+  if (summary.length) cell.append(element("p", summary.join(" · "), "muted"));
+  return cell;
+}
+async function fetchJobs() {
+  const data = await api("/downloads?limit=50&include_live=true");
   $("#jobs").replaceChildren();
   $("#jobs-count").textContent = `共 ${data.total} 条记录，显示最近 50 条。`;
   for (const job of data.items) {
     const row = element("tr");
-    const first = element("td", job.torrent_id);
+    const first = element("td", job.download_status?.name || job.torrent_id);
+    if (job.download_status?.name)
+      first.append(element("p", job.torrent_id, "muted"));
     first.append(element("p", date(job.created_at), "muted"));
     const path = element("td", job.actual_save_path || job.save_path);
     if (job.actual_save_path && job.actual_save_path !== job.save_path)
@@ -268,7 +327,8 @@ async function loadJobs() {
       ),
     );
     const action = element("td");
-    action.append(
+    const actions = element("div", undefined, "actions");
+    actions.append(
       button("查看", async () => {
         const detail = await api("/downloads/" + job.id);
         $("#job-detail").textContent = JSON.stringify(detail, null, 2);
@@ -276,7 +336,43 @@ async function loadJobs() {
         await loadJobs();
       }),
     );
-    row.append(first, path, state, element("td", job.message), action);
+    const remove = button(
+      "删除记录",
+      async () => {
+        const warning =
+          job.submission_status === "uncertain"
+            ? "该任务提交结果待确认，请先核对下载器。\n"
+            : "";
+        if (
+          !confirm(
+            warning +
+              "仅删除本应用的提交记录，不会删除 qBittorrent 任务或文件。确定删除？",
+          )
+        )
+          return;
+        await api("/downloads/" + job.id, { method: "DELETE" });
+        $("#job-detail").hidden = true;
+        $("#job-detail").textContent = "";
+        row.remove();
+        notice("提交记录已删除，下载器任务和文件不受影响");
+        // Discard any pre-deletion refresh before requesting the current list.
+        if (jobsLoading) await jobsLoading.catch(() => {});
+        await loadJobs();
+      },
+      "secondary danger",
+    );
+    remove.disabled = ["queued", "processing"].includes(job.submission_status);
+    if (remove.disabled) remove.title = "排队或提交中的记录暂不能删除";
+    actions.append(remove);
+    action.append(actions);
+    row.append(
+      first,
+      path,
+      state,
+      downloadProgress(job),
+      element("td", job.message),
+      action,
+    );
     $("#jobs").append(row);
   }
 }

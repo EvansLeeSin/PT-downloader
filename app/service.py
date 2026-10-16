@@ -152,6 +152,22 @@ class DownloadWorker:
         )
 
 
+def public_download_status(torrent: dict) -> dict:
+    return {
+        key: torrent.get(key)
+        for key in (
+            "name",
+            "state",
+            "progress",
+            "dlspeed",
+            "upspeed",
+            "size",
+            "amount_left",
+            "save_path",
+        )
+    }
+
+
 def public_job(job: dict) -> dict:
     fields = (
         "id",

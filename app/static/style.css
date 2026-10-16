@@ -179,6 +179,20 @@ td p {
   padding: 3px 7px;
   font-size: 12px;
 }
+button.danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+.download-progress {
+  min-width: 160px;
+}
+.download-progress progress {
+  display: block;
+  width: 160px;
+  height: 10px;
+  margin-top: 7px;
+  accent-color: #2563eb;
+}
 .badge.free {
   color: #087f5b;
   background: #e5f7ee;

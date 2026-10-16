@@ -50,8 +50,8 @@
               aria-label="搜索关键词"
             /><select name="mode" aria-label="搜索范围">
               <option value="normal">综合</option>
-              <option value="adult">成人</option>
-            </select><label class="check"
+              <option value="adult">成人</option></select
+            ><label class="check"
               ><input type="checkbox" name="free_only" />站点免费筛选</label
             ><button type="submit">搜索</button>
           </form>
@@ -88,7 +88,9 @@
             <button id="refresh-jobs" class="secondary">刷新</button>
           </div>
           <p class="muted">
-            “已添加”不等于下载完成；待确认的任务不会自动重新提交。点击“查看”可核对下载器实时状态。
+            下载进度每 5
+            秒刷新；“已添加”不等于下载完成，待确认的任务不会自动重新提交。删除记录不会删除
+            qBittorrent 任务或文件，排队和提交中暂不能删除。
           </p>
           <div class="table-wrap">
             <table>
@@ -96,7 +98,8 @@
                 <tr>
                   <th>资源 / 时间</th>
                   <th>保存目录</th>
-                  <th>状态</th>
+                  <th>提交状态</th>
+                  <th>下载进度</th>
                   <th>说明</th>
                   <th></th>
                 </tr>
@@ -220,6 +223,12 @@
                   name="scopes"
                   value="downloads:create"
                 />添加下载</label
+              ><label class="check"
+                ><input
+                  type="checkbox"
+                  name="scopes"
+                  value="downloads:delete"
+                />删除提交记录（不删除文件）</label
               >
             </div>
             <button type="submit">创建令牌</button>

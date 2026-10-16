@@ -46,11 +46,19 @@ class Store:
                     location_id TEXT NOT NULL, save_path TEXT NOT NULL, start_paused INTEGER NOT NULL,
                     qb_url TEXT NOT NULL, submission_status TEXT NOT NULL,
                     info_hash TEXT, expected_hashes TEXT, actual_save_path TEXT, error_code TEXT, message TEXT NOT NULL,
-                    created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                    created_at REAL NOT NULL, updated_at REAL NOT NULL, deleted_at REAL,
                     UNIQUE(owner, idem_key)
                 );
                 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(submission_status, created_at);
             """)
+            # Upgrade existing data directories without losing history or idempotency.
+            columns = {row["name"] for row in con.execute("PRAGMA table_info(jobs)")}
+            if "deleted_at" not in columns:
+                con.execute("ALTER TABLE jobs ADD COLUMN deleted_at REAL")
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS jobs_visible ON jobs(created_at DESC) "
+                "WHERE deleted_at IS NULL"
+            )
             con.execute(
                 "INSERT OR IGNORE INTO config VALUES ('settings', ?)",
                 (self.encrypt(Settings().model_dump()),),
@@ -197,6 +205,10 @@ class Store:
                     raise AppError(
                         "IDEMPOTENCY_CONFLICT", "同一个幂等键不能用于不同的下载请求", 409
                     )
+                if previous["deleted_at"] is not None:
+                    raise AppError(
+                        "JOB_DELETED", "该幂等键对应的提交记录已删除，不会重新提交下载", 409
+                    )
                 return dict(previous)
             config = self._settings(con)
             if not config.site_api_key or not config.qb_url:
@@ -249,7 +261,7 @@ class Store:
     def claim_job(self):
         with self.connect(write=True) as con:
             row = con.execute(
-                "SELECT * FROM jobs WHERE submission_status='queued' ORDER BY created_at LIMIT 1"
+                "SELECT * FROM jobs WHERE submission_status='queued' AND deleted_at IS NULL ORDER BY created_at LIMIT 1"
             ).fetchone()
             if not row:
                 return None
@@ -279,15 +291,31 @@ class Store:
 
     def job(self, job_id: str):
         with self.connect() as con:
-            row = con.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+            row = con.execute(
+                "SELECT * FROM jobs WHERE id=? AND deleted_at IS NULL", (job_id,)
+            ).fetchone()
         if not row:
             raise AppError("JOB_NOT_FOUND", "提交记录不存在", 404)
         return dict(row)
 
+    def delete_job(self, job_id: str):
+        # Retain a tombstone so replaying an old idempotency key cannot resubmit.
+        # The status check and deletion share a writer lock with the queue worker.
+        with self.connect(write=True) as con:
+            row = con.execute(
+                "SELECT submission_status FROM jobs WHERE id=? AND deleted_at IS NULL", (job_id,)
+            ).fetchone()
+            if not row:
+                raise AppError("JOB_NOT_FOUND", "提交记录不存在", 404)
+            if row["submission_status"] in ("queued", "processing"):
+                raise AppError("JOB_ACTIVE", "任务正在排队或提交，暂不能删除记录", 409)
+            con.execute("UPDATE jobs SET deleted_at=? WHERE id=?", (time.time(), job_id))
+
     def jobs(self, limit: int, offset: int):
         with self.connect() as con:
             rows = con.execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)
+                "SELECT * FROM jobs WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             ).fetchall()
-            total = con.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+            total = con.execute("SELECT COUNT(*) FROM jobs WHERE deleted_at IS NULL").fetchone()[0]
         return [dict(row) for row in rows], total

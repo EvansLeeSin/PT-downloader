@@ -13,7 +13,7 @@ from app.errors import AppError
 
 bearer = HTTPBearer(auto_error=False)
 COOKIE = "mtd_session"
-SCOPES = ["search:read", "downloads:read", "downloads:create"]
+SCOPES = ["search:read", "downloads:read", "downloads:create", "downloads:delete"]
 
 
 class RateLimiter:

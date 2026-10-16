@@ -66,6 +66,9 @@ class SmokeQb:
             "category_paths": [],
         }
 
+    def find_many(self, hashes):
+        return {value: task for value, task in self.tasks.items() if value in hashes}
+
     def find(self, hashes):
         return self.tasks.get(HASH) if HASH in hashes else None
 
@@ -76,6 +79,9 @@ class SmokeQb:
             "save_path": save_path,
             "state": "stoppedDL" if paused else "downloading",
             "progress": 0.5,
+            "dlspeed": 1048576,
+            "size": 1073741824,
+            "amount_left": 536870912,
         }
         return "Ok."
 
