@@ -23,6 +23,7 @@ def main():
     search.add_argument("keyword")
     search.add_argument("--page", type=int, default=1)
     search.add_argument("--free-only", action="store_true")
+    search.add_argument("--mode", choices=("normal", "adult"), default="normal", help="综合 / 成人")
     commands.add_parser("locations")
     add = commands.add_parser("add")
     add.add_argument("torrent_id")
@@ -49,6 +50,7 @@ def main():
                     "torrents/search",
                     params={
                         "keyword": args.keyword,
+                        "mode": args.mode,
                         "page": args.page,
                         "free_only": args.free_only,
                     },

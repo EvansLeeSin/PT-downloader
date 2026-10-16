@@ -39,6 +39,34 @@ try {
   await page.locator("#search-form [name=keyword]").fill("测试资源");
   await page.locator("#search-form button").click();
   await page.locator("#results").getByText("浏览器测试资源 1080p").waitFor();
+  assert.equal(await page.locator('#search-form [name=mode]').inputValue(), 'normal');
+  await page.locator('#search-form [name=mode]').selectOption('adult');
+  await page.waitForTimeout(1100); // Respect the site's one-second search cooldown.
+  const [adultSearch] = await Promise.all([
+    page.waitForResponse(response => response.url().includes('/api/v1/torrents/search?')),
+    page.locator('#search-form button').click(),
+  ]);
+  assert.equal(new URL(adultSearch.url()).searchParams.get('mode'), 'adult');
+  assert.equal(adultSearch.status(), 200);
+  await page.locator('#results').getByText('成人分区测试资源 1080p').waitFor();
+  await page.waitForTimeout(1100);
+  const [adultPage] = await Promise.all([
+    page.waitForResponse(response => response.url().includes('/api/v1/torrents/search?')),
+    page.locator('#next-page').click(),
+  ]);
+  assert.equal(new URL(adultPage.url()).searchParams.get('mode'), 'adult');
+  assert.equal(new URL(adultPage.url()).searchParams.get('page'), '2');
+  assert.equal(adultPage.status(), 200);
+  await page.locator('#page-label').getByText('第 2 页').waitFor();
+  await page.locator('#search-form [name=mode]').selectOption('normal');
+  const [normalSearch] = await Promise.all([
+    page.waitForResponse(response => response.url().includes('/api/v1/torrents/search?')),
+    page.locator('#search-form button').click(),
+  ]);
+  assert.equal(new URL(normalSearch.url()).searchParams.get('mode'), 'normal');
+  assert.equal(new URL(normalSearch.url()).searchParams.get('page'), '1');
+  assert.equal(normalSearch.status(), 200);
+  await page.locator('#results').getByText('浏览器测试资源 1080p').waitFor();
   await page.screenshot({
     path: "/tmp/mteam-downloader-search.png",
     fullPage: true,
@@ -94,7 +122,7 @@ try {
   await page.locator("#login-panel").waitFor({ state: "visible" });
   assert.deepEqual(errors, []);
   console.log(
-    "Browser smoke passed: login → settings → search → submit → query → API token → revoke → logout",
+    "Browser smoke passed: login → settings → normal/adult search + pagination → submit → query → API token → revoke → logout",
   );
 } catch (error) {
   console.error("UI notice:", await page.locator("#notice").textContent());

@@ -23,13 +23,14 @@ Authorization: Bearer mtd_...
 ## 1. 检索
 
 ```http
-GET /torrents/search?keyword=流浪地球&page=1&page_size=20&free_only=false
+GET /torrents/search?keyword=流浪地球&mode=normal&page=1&page_size=20&free_only=false
 ```
 
 - `keyword`：必填，1–200 字符，支持标题、关键词或 `tt...` IMDb ID。
+- `mode`：`normal`（综合，默认）或 `adult`（成人），直接传给 M-Team 搜索接口。两区分别检索，综合不等于包含成人区的“全站”；切换分区时建议将 `page` 重置为 1。缓存按分区隔离。
 - `page`：从 1 开始，最多 10000。
 - `page_size`：1–100，默认 20。
-- `categories`：可重复传 M-Team 站点分类 ID，例如 `&categories=401&categories=419`。不是 qBittorrent 分类。
+- `categories`：可重复传 M-Team 站点分类 ID，例如 `&categories=401&categories=419`。不是 qBittorrent 分类；应与所选 `mode` 分区匹配，成人区检索示例：`/torrents/search?keyword=资源名&mode=adult`。
 - `free_only`：请求站点免费筛选，不构成对实际下载计费的保证。
 
 ```json
@@ -216,7 +217,7 @@ HTTP 错误和任务内部错误是两层：请求入队失败返回 HTTP 错误
 
 将 OpenAPI 封装为小范围工具，而不是把所有管理 API 暴露给模型：
 
-1. `search_resources(keyword, page, free_only)`：只读。
+1. `search_resources(keyword, page, free_only, mode="normal")`：只读；`mode="adult"` 检索成人分区。
 2. `get_resource(id)`：只读。
 3. `list_download_locations()`：只读。
 4. `add_download(resource_id, location_id, start_paused, idempotency_key)`：有副作用。

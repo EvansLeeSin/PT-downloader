@@ -14,10 +14,11 @@
 - [qBittorrent 兼容测试](https://github.com/jxxghp/MoviePilot/blob/2149eb2a600539d6170d5ea76a9f6d49e4bd943c/tests/test_qbittorrent_compat.py)
 - [qBittorrent 官方 API 文档](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-%28qBittorrent-5.0%29)
 - [qbittorrent-api 文档](https://qbittorrent-api.readthedocs.io/)
+- [PT-depiler M-Team 定义](https://github.com/pt-plugins/PT-depiler/blob/master/src/packages/site/definitions/mteam.ts)：核对搜索 `mode=normal`（综合）与 `mode=adult`（成人）的请求参数；不复制实现代码。
 
 ## 采用的接口行为
 
-- M-Team 搜索使用 API Key 请求头和 JSON 请求，页码从 1 开始。
+- M-Team 搜索使用 API Key 请求头和 JSON 请求，页码从 1 开始；显式传递 `mode=normal/adult` 区分综合和成人分区。
 - 网页地址与 API 地址可分别设置。
 - 下载通过资源 ID 换取当前链接，再获取种子文件，而不是拼接普通磁力链接。
 - 解析普通优惠、全站促销、单种免费、新旧标签。

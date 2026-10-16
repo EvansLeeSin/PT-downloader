@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Scope = Literal["search:read", "downloads:read", "downloads:create"]
+SearchMode = Literal["normal", "adult"]
 
 
 class StrictModel(BaseModel):

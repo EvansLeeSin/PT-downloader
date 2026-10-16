@@ -22,19 +22,21 @@ class SmokeSite:
     def __init__(self, config: Settings):
         self.config = config
 
-    def search(self, keyword, page, page_size, categories, free_only):
+    def search(self, keyword, page, page_size, categories, free_only, mode="normal"):
         from app.clients.mteam import MTeamClient
 
         item = MTeamClient(self.config)._torrent(
             {
                 "id": "123456",
-                "name": "浏览器测试资源 1080p",
+                "name": "成人分区测试资源 1080p" if mode == "adult" else "浏览器测试资源 1080p",
                 "smallDescr": "仅用于测试，不会访问真实站点",
                 "size": "1073741824",
                 "status": {"seeders": 12, "discount": "FREE"},
             }
         )
-        return SearchResult(items=[item], page=page, page_size=page_size, has_more=False, total=1)
+        return SearchResult(
+            items=[item], page=page, page_size=page_size, has_more=page == 1, total=2
+        )
 
     def test(self):
         return {"connected": True, "username": "smoke"}

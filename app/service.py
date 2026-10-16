@@ -6,7 +6,7 @@ import time
 from app.clients.mteam import MTeamClient
 from app.clients.qbittorrent import QbClient
 from app.errors import AppError
-from app.models import SearchResult
+from app.models import SearchMode, SearchResult
 from app.store import Store, token_digest
 from app.torrent import identify_torrent
 
@@ -20,7 +20,7 @@ class SearchService:
         self.cache: dict[tuple, tuple[float, SearchResult]] = {}
         self.last_call = 0.0
 
-    def search(self, keyword, page, page_size, categories, free_only):
+    def search(self, keyword, page, page_size, categories, free_only, mode: SearchMode = "normal"):
         config = self.store.settings()
         key = (
             token_digest(config.model_dump_json()),
@@ -29,6 +29,7 @@ class SearchService:
             page_size,
             tuple(categories),
             free_only,
+            mode,
         )
         with self.lock:
             now = time.monotonic()
@@ -38,7 +39,9 @@ class SearchService:
             if now - self.last_call < 1:
                 raise AppError("SEARCH_RATE_LIMITED", "搜索过于频繁，请至少间隔 1 秒", 429)
             self.last_call = now
-            result = MTeamClient(config).search(keyword, page, page_size, categories, free_only)
+            result = MTeamClient(config).search(
+                keyword, page, page_size, categories, free_only, mode
+            )
             if len(self.cache) >= 100:
                 self.cache.pop(next(iter(self.cache)))
             self.cache[key] = (time.monotonic(), result)

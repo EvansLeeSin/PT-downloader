@@ -137,6 +137,10 @@ label {
 .search-bar > input {
   flex: 1;
 }
+.search-bar > select {
+  width: auto;
+  flex-shrink: 0;
+}
 .table-wrap {
   overflow: auto;
 }

@@ -1,6 +1,10 @@
+import json
 import sqlite3
+from types import SimpleNamespace
 
+import httpx
 import pytest
+import respx
 
 from app.errors import AppError
 from app.models import DownloadCreate
@@ -20,7 +24,10 @@ def test_health_static_and_openapi(client):
     assert client.get("/").status_code == 200
     assert client.get("/static/app.js").status_code == 200
     schema = client.get("/openapi.json").json()
-    assert "/api/v1/torrents/search" in schema["paths"]
+    search_parameters = schema["paths"]["/api/v1/torrents/search"]["get"]["parameters"]
+    mode = next(value for value in search_parameters if value["name"] == "mode")
+    assert mode["schema"]["enum"] == ["normal", "adult"]
+    assert mode["schema"]["default"] == "normal"
     assert schema["paths"]["/api/v1/downloads"]["post"]["responses"]["202"]["content"][
         "application/json"
     ]["schema"]["$ref"].endswith("DownloadJob")
@@ -226,3 +233,43 @@ def test_queue_limit(configured):
         store.create_job("test", "action-" + str(i), DownloadCreate(torrent_id="mteam:1"))
     with pytest.raises(AppError, match="队列已满"):
         store.create_job("test", "overflow-key", DownloadCreate(torrent_id="mteam:1"))
+
+
+@respx.mock
+def test_search_mode_reaches_site_and_separates_cache(configured, monkeypatch):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("app.service.time", SimpleNamespace(monotonic=lambda: clock.now))
+
+    def upstream(request):
+        mode = json.loads(request.content)["mode"]
+        return httpx.Response(
+            200,
+            json={"code": 0, "data": {"data": [{"id": "123", "name": mode}], "total": 1}},
+        )
+
+    route = respx.post("https://api.mteam.test/api/torrent/search").mock(side_effect=upstream)
+    token = api_token(configured, ["search:read"])
+    headers = {"Authorization": "Bearer " + token["token"]}
+    query = {"keyword": "same keyword"}
+    normal = configured.get("/api/v1/torrents/search", params=query, headers=headers)
+    assert normal.status_code == 200
+    assert normal.json()["items"][0]["title"] == "normal"
+    clock.now += 2
+    adult = configured.get(
+        "/api/v1/torrents/search", params={**query, "mode": "adult"}, headers=headers
+    )
+    assert adult.status_code == 200
+    assert adult.json()["items"][0]["title"] == "adult"
+    for mode, expected in [("normal", normal), ("adult", adult)]:
+        cached = configured.get(
+            "/api/v1/torrents/search", params={**query, "mode": mode}, headers=headers
+        )
+        assert cached.status_code == 200
+        assert cached.json() == expected.json()
+    assert route.call_count == 2
+
+
+@pytest.mark.parametrize("mode", ["all", "ADULT", "", "unknown"])
+def test_search_rejects_invalid_mode(admin, mode):
+    result = admin.get("/api/v1/torrents/search", params={"keyword": "资源", "mode": mode})
+    assert result.status_code == 422

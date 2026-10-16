@@ -132,6 +132,7 @@ $("#logout").addEventListener("click", () =>
 formAction("#search-form", async (form) => {
   searchState = {
     keyword: form.keyword.value.trim(),
+    mode: form.mode.value,
     free_only: form.free_only.checked,
   };
   page = 1;

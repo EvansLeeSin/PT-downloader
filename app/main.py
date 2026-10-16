@@ -36,6 +36,7 @@ from app.models import (
     LocationsResult,
     LocationsUpdate,
     Login,
+    SearchMode,
     SearchResult,
     SettingsUpdate,
     TokenCreate,
@@ -278,12 +279,15 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
         page_size: Annotated[int, Query(ge=1, le=100)] = 20,
         categories: Annotated[list[str] | None, Query(max_length=20)] = None,
         free_only: bool = False,
+        mode: Annotated[
+            SearchMode, Query(description="搜索分区：normal 综合，adult 成人")
+        ] = "normal",
     ):
         keyword = keyword.strip()
         if not keyword:
             raise AppError("INVALID_KEYWORD", "搜索词不能为空", 422)
         return request.app.state.search.search(
-            keyword, page, page_size, categories or [], free_only
+            keyword, page, page_size, categories or [], free_only, mode
         )
 
     @application.get(

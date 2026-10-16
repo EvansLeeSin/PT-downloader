@@ -48,12 +48,15 @@
               maxlength="200"
               required
               aria-label="搜索关键词"
-            /><label class="check"
+            /><select name="mode" aria-label="搜索范围">
+              <option value="normal">综合</option>
+              <option value="adult">成人</option>
+            </select><label class="check"
               ><input type="checkbox" name="free_only" />站点免费筛选</label
             ><button type="submit">搜索</button>
           </form>
           <p class="muted">
-            站点优惠可能变化，提交前请核对。首次使用请先配置连接信息。
+            综合与成人分区分别检索；找不到资源时请确认搜索范围。站点优惠可能变化，提交前请核对。首次使用请先配置连接信息。
           </p>
           <div class="table-wrap">
             <table>

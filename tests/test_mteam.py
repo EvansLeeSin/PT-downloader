@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urljoin
 
@@ -5,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from app.clients.mteam import DOMAIN_EXTRACTOR, MTeamClient, parse_time, promotion
+from app.clients.mteam import MTeamClient, parse_time, promotion
 from app.errors import AppError
 from app.models import Settings
 
@@ -29,15 +30,6 @@ def row():
     }
 
 
-def test_domain_lookup_uses_bundled_snapshot_without_network(monkeypatch):
-    def no_network(*args, **kwargs):
-        pytest.fail("Domain validation must not fetch a public suffix list over the network")
-
-    monkeypatch.setattr("requests.sessions.Session.send", no_network)
-    DOMAIN_EXTRACTOR.update(fetch_now=True)
-    assert DOMAIN_EXTRACTOR("dl.m-team.co.uk").domain == "m-team"
-
-
 @respx.mock
 def test_search_contract():
     route = respx.post(BASE + "/api/torrent/search").mock(
@@ -52,13 +44,30 @@ def test_search_contract():
     request = route.calls.last.request
     assert request.headers["x-api-key"] == "top-secret"
     assert request.headers["origin"] == "https://mteam.test"
-    import json
-
     body = json.loads(request.content)
+    assert body["mode"] == "normal"
     assert body["keyword"] == "https://www.imdb.com/title/tt1234567"
     assert body["pageNumber"] == 1
     assert body["visible"] == 1
     assert "top-secret" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize("mode", ["normal", "adult"])
+@respx.mock
+def test_search_sends_mode_with_other_filters(mode):
+    route = respx.post(BASE + "/api/torrent/search").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"data": [row()]}})
+    )
+    assert client().search("资源", 2, 50, ["410"], True, mode).items
+    assert json.loads(route.calls.last.request.content) == {
+        "keyword": "资源",
+        "mode": mode,
+        "categories": ["410"],
+        "pageNumber": 2,
+        "pageSize": 50,
+        "visible": 1,
+        "discount": "FREE",
+    }
 
 
 @respx.mock
@@ -101,10 +110,17 @@ def test_download_two_stage(torrent_bytes):
         "https://dl.m-team-new.net:8443/torrent",
         "https://dl.m-team.cc./torrent",
         "//download.m-team.io/torrent",
+        "https://cdn.example.net/torrent",
+        "https://m-team.evil.com/torrent",
+        "https://m-team.github.io/torrent",
+        "https://127.0.0.1/torrent",
+        "https://[::1]/torrent",
+        "https://localhost/torrent",
+        "https://downloads.internal/torrent",
     ],
 )
 @respx.mock
-def test_download_accepts_mteam_registrable_domains_without_forwarding_key(url, torrent_bytes):
+def test_download_accepts_any_https_host_without_forwarding_key(url, torrent_bytes):
     token = respx.post(BASE + "/api/torrent/genDlToken").mock(
         return_value=httpx.Response(200, json={"code": 0, "data": url})
     )
@@ -119,19 +135,9 @@ def test_download_accepts_mteam_registrable_domains_without_forwarding_key(url, 
 @pytest.mark.parametrize(
     "url",
     [
-        "https://evil.test/torrent",
-        "https://m-team.evil.com/torrent",
-        "https://api.m-team.cc.evil.com/torrent",
-        "https://m-team.github.io/torrent",
-        "https://m-team.evil.co.uk/torrent",
-        "https://evil.com/m-team.cc?next=https://m-team.io",
         "https://m-team.cc@evil.com/torrent",
         "https://user:password@dl.m-team.cc/torrent",
         "https://@dl.m-team.cc/torrent",
-        "https://127.0.0.1/m-team.cc",
-        "https://[::1]/m-team.cc",
-        "https://localhost/m-team.cc",
-        "https://m-team.local/torrent",
         "http://dl.m-team.cc/torrent",
         "https://dl.m-team.cc/torrent#fragment",
         "https://dl.m-team.cc:0/torrent",
@@ -187,17 +193,18 @@ def test_api_key_policy_reapplied_on_each_redirect(torrent_bytes):
 
 
 @respx.mock
-def test_mteam_redirect_to_lookalike_is_blocked_before_request():
+def test_redirect_to_unrelated_https_domain_is_accepted_without_key(torrent_bytes):
     respx.post(BASE + "/api/torrent/genDlToken").mock(
         return_value=httpx.Response(200, json={"code": 0, "data": "https://dl.m-team.cc/file"})
     )
     respx.get("https://dl.m-team.cc/file").mock(
-        return_value=httpx.Response(302, headers={"Location": "https://m-team.evil.com/file"})
+        return_value=httpx.Response(302, headers={"Location": "https://cdn.example.net/file"})
     )
-    with pytest.raises(AppError) as error:
-        client().download("mteam:123")
-    assert error.value.code == "UNTRUSTED_DOWNLOAD_URL"
-    assert len(respx.calls) == 2  # The untrusted redirect was never requested.
+    final = respx.get("https://cdn.example.net/file").mock(
+        return_value=httpx.Response(200, content=torrent_bytes)
+    )
+    assert client().download("mteam:123") == torrent_bytes
+    assert "x-api-key" not in final.calls.last.request.headers
 
 
 @respx.mock

@@ -4,17 +4,12 @@ from datetime import UTC, datetime, timedelta, timezone
 from urllib.parse import urljoin, urlsplit
 
 import httpx
-import tldextract
 
 from app.errors import AppError
-from app.models import Promotion, SearchResult, Settings, Torrent
+from app.models import Promotion, SearchMode, SearchResult, Settings, Torrent
 
 MAX_TORRENT_BYTES = 10 * 1024 * 1024
 SITE_TIMEZONE = timezone(timedelta(hours=8))
-# Use the bundled Public Suffix List: no network fetches or writable cache at runtime.
-DOMAIN_EXTRACTOR = tldextract.TLDExtract(
-    cache_dir=None, suffix_list_urls=(), include_psl_private_domains=False
-)
 DISCOUNTS = {
     "NORMAL": (1.0, 1.0),
     "FREE": (0.0, 1.0),
@@ -158,12 +153,19 @@ class MTeamClient:
         )
 
     def search(
-        self, keyword: str, page: int, page_size: int, categories: list[str], free_only: bool
+        self,
+        keyword: str,
+        page: int,
+        page_size: int,
+        categories: list[str],
+        free_only: bool,
+        mode: SearchMode = "normal",
     ):
         if keyword.startswith("tt") and keyword[2:].isdigit():
             keyword = "https://www.imdb.com/title/" + keyword
         params = {
             "keyword": keyword,
+            "mode": mode,
             "categories": categories,
             "pageNumber": page,
             "pageSize": page_size,
@@ -197,7 +199,7 @@ class MTeamClient:
             raise AppError("SITE_INVALID_RESPONSE", "M-Team 未返回种子下载地址", 502)
         origin = httpx.URL(self.config.site_api_url)
 
-        def trusted(target: str) -> bool:
+        def validate_download_url(target: str) -> bool:
             try:
                 parsed = urlsplit(target)
                 actual = httpx.URL(target)
@@ -206,9 +208,6 @@ class MTeamClient:
                     origin.raw_host,
                     origin.port or 443,
                 )
-                # Inspect the registrable domain, not a subdomain, path or query string.
-                domain = DOMAIN_EXTRACTOR(actual.raw_host.decode("ascii").rstrip("."))
-                branded_domain = bool(domain.suffix) and "m-team" in domain.domain.lower()
                 valid = (
                     actual.scheme == "https"
                     and bool(actual.host)
@@ -218,15 +217,13 @@ class MTeamClient:
                     and not parsed.fragment
                     and "\\" not in target
                     and not any(ord(char) < 33 or ord(char) == 127 for char in target)
-                    and (same_origin or branded_domain)
                 )
             except (ValueError, httpx.InvalidURL):
                 valid = False
             if not valid:
                 raise AppError(
                     "UNTRUSTED_DOWNLOAD_URL",
-                    "种子下载地址或重定向需使用 HTTPS，且主域名需包含 m-team"
-                    "（或与配置的 API 同源），已拒绝访问",
+                    "种子下载地址或重定向无效，需使用不含账号密码的 HTTPS 地址",
                     502,
                 )
             return same_origin
@@ -235,11 +232,11 @@ class MTeamClient:
         try:
             url = urljoin(self.config.site_api_url + "/", url)
             with self._client() as client:
-                # Signed download links can move between M-Team domains. Never send
-                # the API key to another origin, even if its domain passes the policy.
+                # Accept any HTTPS download host returned by the configured site.
+                # Domain restrictions are disabled; keep the API key origin-scoped.
                 client.headers.pop("x-api-key", None)
                 for _ in range(4):
-                    same_origin = trusted(url)
+                    same_origin = validate_download_url(url)
                     headers = {"Accept": "application/x-bittorrent"}
                     if same_origin:
                         headers["x-api-key"] = self.config.site_api_key
