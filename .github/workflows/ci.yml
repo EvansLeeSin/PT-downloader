@@ -35,7 +35,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-      - run: node --check app/static/app.js
+      - name: Check browser JavaScript
+        run: |
+          node --check app/static/app.js
+          node --check app/static/theme.js
       - run: docker compose config --quiet
         env:
           APP_ADMIN_PASSWORD: ci-validation-password-only

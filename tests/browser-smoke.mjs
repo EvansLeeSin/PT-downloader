@@ -1,5 +1,6 @@
 // Optional E2E test against tests.smoke_app, NOT against a real installation.
 import assert from "node:assert/strict";
+import { checkThemePreference, checkDarkSurfaces } from "./theme-ui.mjs";
 import { checkJobsWorkspace } from "./jobs-ui.mjs";
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE || "playwright"
@@ -10,17 +11,19 @@ const browser = await chromium.launch({
     ? { executablePath: process.env.CHROMIUM_PATH }
     : {}),
 });
-const page = await browser.newPage({
+const context = await browser.newContext({
   viewport: { width: 1280, height: 900 },
   permissions: ["clipboard-read", "clipboard-write"],
   locale: "zh-CN",
   timezoneId: "Asia/Hong_Kong",
 });
+const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 try {
   await page.goto("http://127.0.0.1:18088");
   await page.locator("#login-panel").waitFor({ state: "visible" });
+  await checkThemePreference(page);
   await page
     .locator("#login-form [name=password]")
     .fill("local-test-password-123");
@@ -215,6 +218,12 @@ try {
     .filter({ hasText: "downloading" })
     .waitFor();
   await page.locator("[data-tab=tokens]").click();
+  await page.locator("#theme-select").selectOption("dark");
+  await checkDarkSurfaces(page, [
+    "#tokens-panel",
+    "#token-form input",
+    "#token-form button",
+  ]);
   await page.locator("#token-form [name=name]").fill("Browser AI");
   await page.locator('#token-form [value="downloads:create"]').check();
   await page.locator("#token-form button").click();
@@ -235,6 +244,7 @@ try {
   assert.equal(result.status(), 200);
   assert.equal((await result.json()).items[0].path, "/downloads");
   page.once("dialog", (dialog) => dialog.accept());
+  await checkDarkSurfaces(page, ["#new-token", "#token-list .muted"]);
   await page.locator("#token-list button").first().click();
   await page
     .locator("#token-list")
@@ -305,7 +315,7 @@ try {
   await page.locator("#login-panel").waitFor({ state: "visible" });
   assert.deepEqual(errors, []);
   console.log(
-    "Browser smoke passed: setup guide → unsaved changes → search/loading/error recovery → idempotent retry after lost response → highlighted job/live refresh recovery → responsive cards → token copy/revoke → delete record/empty state → workspace filters/pagination/drawer/recheck/history recovery → logout",
+    "Browser smoke passed: setup guide → unsaved changes → search/loading/error recovery → idempotent retry after lost response → highlighted job/live refresh recovery → responsive cards → token copy/revoke → delete record/empty state → workspace filters/pagination/drawer/recheck/history recovery → themes/system/storage/contrast → logout",
   );
 } catch (error) {
   console.error("UI notice:", await page.locator("#notice").textContent());

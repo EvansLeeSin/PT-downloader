@@ -6,6 +6,8 @@
 
 ## 功能
 
+- 页面顶部可切换浅色、深色或跟随系统；默认跟随系统，在当前浏览器记住选择。
+
 - 关键词 / IMDb ID 搜索，区分综合（`normal`）与成人（`adult`）分区；支持分页、分类参数、站点免费筛选，展示大小、做种人数、标签和优惠。网页、API 与示例客户端均支持切换分区。
 - 获取临时下载链接后，由后端读取 `.torrent`，校验 v1/v2/hybrid hash，再上传给 qBittorrent。
 - 单个 qBittorrent，保存目录预设，初始目录为 `/downloads`，可在网页修改。
@@ -172,6 +174,7 @@ export APP_ADMIN_PASSWORD='请替换成至少12位的本地管理员密码'
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 node --check app/static/app.js
+node --check app/static/theme.js
 ```
 
 测试不会访问真实站点或添加真实下载。`test_qbittorrent.py` 会启动本地 HTTP 假服务，使用真实 SDK 验证登录、multipart 上传、手动管理模式、保存路径和 hash 查询。

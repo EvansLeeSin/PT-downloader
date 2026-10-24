@@ -1,5 +1,6 @@
 // Additional workspace checks use mocked API responses, never real downloads.
 import assert from "node:assert/strict";
+import { checkDarkSurfaces } from "./theme-ui.mjs";
 export async function checkJobsWorkspace(page, base) {
   const now = Date.now() / 1000;
   const live = {
@@ -117,7 +118,20 @@ export async function checkJobsWorkspace(page, base) {
       .evaluate((node) => node.classList.contains("has-detail")),
     true,
   );
-  await page.screenshot({ path: "/tmp/mteam-v2-desktop.png", fullPage: true });
+  await page.locator("#theme-select").selectOption("dark");
+  await checkDarkSurfaces(page, [
+    "#jobs-main",
+    "#job-detail",
+    ".job-warning",
+    "#jobs-scope",
+    ".status-uncertain",
+    "#job-detail .drawer-refresh",
+    ".filter-tabs button[aria-pressed=true]",
+  ]);
+  await page.screenshot({
+    path: "/tmp/mteam-dark-desktop.png",
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(
     () => document.querySelector("#job-mobile-dialog").open,
@@ -147,7 +161,7 @@ export async function checkJobsWorkspace(page, base) {
   assert.equal(mobileBounds.width, 390);
   assert.equal(mobileBounds.height, 844);
   await page.screenshot({
-    path: "/tmp/mteam-v2-mobile-detail.png",
+    path: "/tmp/mteam-dark-mobile-detail.png",
     fullPage: false,
   });
   await page.keyboard.press("Escape");
@@ -185,6 +199,10 @@ export async function checkJobsWorkspace(page, base) {
   await page.locator("#job-detail .drawer-close").click();
   // Changes invalidate previous test results instead of reporting them as current.
   await page.locator('[data-tab="settings"]').click();
+  await checkDarkSurfaces(page, [
+    "#settings-form input",
+    "#settings-panel .card",
+  ]);
   await page
     .locator('#settings-form [name="download_tag"]')
     .fill("workspace-test-tag");

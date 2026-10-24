@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>M-Team Downloader</title>
+    <script src="/static/theme.js"></script>
     <link rel="stylesheet" href="/static/style.css" />
     <script src="/static/app.js" defer></script>
   </head>
@@ -13,7 +14,17 @@
         <h1>M-Team Downloader</h1>
         <p>搜索资源，选择目录，提交到你的 qBittorrent。</p>
       </div>
-      <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a>
+      <div class="header-actions">
+        <label class="theme-control" for="theme-select"
+          >外观
+          <select id="theme-select">
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
+        <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a>
+      </div>
     </header>
     <div id="notice" role="status" hidden></div>
     <main>
