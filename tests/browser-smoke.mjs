@@ -1,5 +1,6 @@
 // Optional E2E test against tests.smoke_app, NOT against a real installation.
 import assert from "node:assert/strict";
+import { checkJobsWorkspace } from "./jobs-ui.mjs";
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE || "playwright"
 );
@@ -12,6 +13,8 @@ const browser = await chromium.launch({
 const page = await browser.newPage({
   viewport: { width: 1280, height: 900 },
   permissions: ["clipboard-read", "clipboard-write"],
+  locale: "zh-CN",
+  timezoneId: "Asia/Hong_Kong",
 });
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
@@ -163,7 +166,7 @@ try {
   await page.locator(".highlighted-job").waitFor({ state: "visible" });
   assert.match(
     await page.locator("#jobs-refresh-state").textContent(),
-    /最后更新于/,
+    /最后更新/,
   );
   await page.route("**/api/v1/downloads?**", (route) =>
     route.fulfill({
@@ -182,7 +185,7 @@ try {
   await page.locator("#refresh-jobs").click();
   await page
     .locator("#jobs-refresh-state")
-    .filter({ hasText: "最后更新于" })
+    .filter({ hasText: "最后更新" })
     .waitFor();
   await page.locator("#jobs progress").waitFor({ state: "visible" });
   assert.equal(
@@ -247,16 +250,20 @@ try {
     "http://127.0.0.1:18088/api/v1/downloads",
   );
   const jobId = (await beforeDelete.json()).items[0].id;
+  await page.locator("#jobs button").first().click();
+  await page
+    .locator("#job-detail .drawer-delete")
+    .waitFor({ state: "visible" });
   page.once("dialog", (dialog) => dialog.dismiss());
   await page
-    .locator("#jobs")
-    .getByRole("button", { name: "删除记录", exact: true })
+    .locator("#job-detail")
+    .getByRole("button", { name: "删除提交记录", exact: true })
     .click();
   assert.equal(await page.locator("#jobs tr").count(), 1);
   page.once("dialog", (dialog) => dialog.accept());
   await page
-    .locator("#jobs")
-    .getByRole("button", { name: "删除记录", exact: true })
+    .locator("#job-detail")
+    .getByRole("button", { name: "删除提交记录", exact: true })
     .click();
   await page.waitForFunction(() =>
     document.querySelector("#jobs-count").textContent.includes("共 0 条记录"),
@@ -293,11 +300,12 @@ try {
     await page.waitForTimeout(200);
   }
   assert.equal(repeatStatus.submission_status, "exists");
+  await checkJobsWorkspace(page, repeatStatus);
   await page.locator("#logout").click();
   await page.locator("#login-panel").waitFor({ state: "visible" });
   assert.deepEqual(errors, []);
   console.log(
-    "Browser smoke passed: setup guide → unsaved changes → search/loading/error recovery → idempotent retry after lost response → highlighted job/live refresh recovery → responsive cards → token copy/revoke → delete record/empty state → logout",
+    "Browser smoke passed: setup guide → unsaved changes → search/loading/error recovery → idempotent retry after lost response → highlighted job/live refresh recovery → responsive cards → token copy/revoke → delete record/empty state → workspace filters/pagination/drawer/recheck/history recovery → logout",
   );
 } catch (error) {
   console.error("UI notice:", await page.locator("#notice").textContent());

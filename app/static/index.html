@@ -100,46 +100,119 @@
             ><button id="next-page" class="secondary" disabled>下一页</button>
           </div>
         </section>
-        <section id="jobs-panel" class="card tab-panel" hidden>
-          <div class="section-title">
-            <h2>最近提交</h2>
-            <button id="refresh-jobs" class="secondary">刷新</button>
+        <section id="jobs-panel" class="tab-panel" hidden>
+          <div id="jobs-workspace" class="jobs-workspace">
+            <div id="jobs-main" class="card jobs-main">
+              <div class="section-title">
+                <div>
+                  <h2>提交记录</h2>
+                  <p class="muted">追踪提交结果与实际下载状态</p>
+                </div>
+                <button id="refresh-jobs" class="secondary">刷新</button>
+              </div>
+              <div class="jobs-toolbar">
+                <div
+                  id="job-filters"
+                  class="filter-tabs"
+                  role="group"
+                  aria-label="筛选提交记录"
+                >
+                  <button
+                    type="button"
+                    data-job-filter="all"
+                    aria-pressed="true"
+                  >
+                    全部 <span>0</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-job-filter="active"
+                    aria-pressed="false"
+                  >
+                    进行中 <span>0</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-job-filter="attention"
+                    aria-pressed="false"
+                  >
+                    需关注 <span>0</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-job-filter="completed"
+                    aria-pressed="false"
+                  >
+                    已完成 <span>0</span>
+                  </button>
+                </div>
+                <p id="jobs-refresh-state" class="muted" role="status">
+                  尚未刷新
+                </p>
+              </div>
+              <p id="jobs-scope" class="muted">正在加载记录…</p>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>资源 / 时间</th>
+                      <th>保存目录</th>
+                      <th>提交状态</th>
+                      <th>下载进度</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="jobs"></tbody>
+                </table>
+              </div>
+              <div id="jobs-empty" class="empty-state" hidden>
+                <p id="jobs-empty-text">还没有提交记录</p>
+                <button id="jobs-search" class="secondary" type="button">
+                  去搜索资源</button
+                ><button
+                  id="jobs-clear-filter"
+                  class="secondary"
+                  type="button"
+                  hidden
+                >
+                  查看全部
+                </button>
+              </div>
+              <div class="jobs-pagination">
+                <p id="jobs-count" class="muted"></p>
+                <div class="pager">
+                  <button id="jobs-prev" class="secondary" disabled>
+                    上一页</button
+                  ><span id="jobs-page-label">第 1 / 1 页</span
+                  ><button id="jobs-next" class="secondary" disabled>
+                    下一页
+                  </button>
+                </div>
+              </div>
+              <div id="jobs-batches" class="actions" hidden>
+                <button id="jobs-newer" type="button" class="secondary">
+                  较新的记录</button
+                ><button id="jobs-older" type="button" class="secondary">
+                  更早的记录
+                </button>
+              </div>
+            </div>
+            <aside
+              id="job-detail"
+              class="job-drawer"
+              aria-labelledby="job-drawer-title"
+              hidden
+            ></aside>
           </div>
-          <p class="muted">
-            下载进度每 5
-            秒刷新；“已添加”不等于下载完成，待确认的任务不会自动重新提交。删除记录不会删除
-            qBittorrent 任务或文件，排队和提交中暂不能删除。
+          <div
+            id="service-status"
+            class="service-status"
+            aria-label="本次会话连接测试记录"
+          ></div>
+          <p class="muted service-help">
+            连接状态仅反映本次会话的测试结果，并非实时在线状态。下载进度每 5
+            秒刷新；“已添加”不等于下载完成。
           </p>
-          <p id="jobs-refresh-state" class="muted" role="status">尚未刷新</p>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>资源 / 时间</th>
-                  <th>保存目录</th>
-                  <th>提交状态</th>
-                  <th>下载进度</th>
-                  <th>说明</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="jobs"></tbody>
-            </table>
-          </div>
-
-          <div id="jobs-empty" class="empty-state" hidden>
-            <p>还没有提交记录</p>
-            <button id="jobs-search" class="secondary" type="button">
-              去搜索资源
-            </button>
-          </div>
-          <p id="jobs-count" class="muted"></p>
-          <section
-            id="job-detail"
-            class="detail-panel"
-            hidden
-            aria-label="任务详情"
-          ></section>
         </section>
         <section id="settings-panel" class="tab-panel" hidden>
           <div class="card">
@@ -282,6 +355,7 @@
         </section>
       </div>
     </main>
+    <dialog id="job-mobile-dialog" aria-labelledby="job-drawer-title"></dialog>
     <dialog id="download-dialog">
       <form id="download-form">
         <h2>添加下载</h2>

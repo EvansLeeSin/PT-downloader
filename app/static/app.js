@@ -16,6 +16,8 @@ let settingsSnapshot = null;
 let locationsSnapshot = null;
 let lastJobsUpdate = null;
 let tokenValue = "";
+let settingsRevision = 0;
+let sessionGeneration = 0;
 const scopeNames = {
   "search:read": "搜索资源",
   "downloads:read": "目录与状态查询",
@@ -112,6 +114,16 @@ async function api(path, options = {}) {
   return data;
 }
 function showLogin() {
+  sessionGeneration++;
+  settingsRevision++;
+  jobsData = { items: [], total: 0 };
+  jobsOffset = 0;
+  jobsPage = 1;
+  jobsFilter = "all";
+  lastJobsUpdate = null;
+  closeJobDetail(false);
+  connectionTests.mteam = connectionTests.qbittorrent = null;
+  renderServiceStatus();
   settingsSnapshot = locationsSnapshot = null;
   if ($("#download-dialog").open) $("#download-dialog").close();
   $("#new-token").textContent = "";
@@ -184,6 +196,7 @@ async function tab(name) {
     (settingsDirty() || locationsDirty())
   )
     return;
+  if (name !== "jobs" && selectedJobId) closeJobDetail(false);
   document.querySelectorAll(".tab-panel").forEach((node) => {
     node.hidden = node.id !== name + "-panel";
   });
@@ -410,6 +423,9 @@ formAction("#download-form", async (form) => {
     });
     $("#download-dialog").removeEventListener("cancel", preventClose);
   }
+  if (jobsLoading) await jobsLoading;
+  jobsOffset = 0;
+  jobsPage = 1;
   highlightedJobId = result.id;
   pendingHighlight = true;
   $("#download-dialog").close();
@@ -473,36 +489,183 @@ function downloadProgress(job) {
   if (summary.length) cell.append(element("p", summary.join(" · "), "muted"));
   return cell;
 }
+const JOB_BATCH_SIZE = 100;
+const JOB_PAGE_SIZE = 10;
+let jobsData = { items: [], total: 0 };
+let jobsOffset = 0;
+let jobsPage = 1;
+let jobsFilter = "all";
+let selectedJobId = null;
+let drawerRequest = 0;
+let drawerReturnFocus = null;
+const mobileDrawer = window.matchMedia("(max-width: 900px)");
+const connectionTests = { mteam: null, qbittorrent: null };
+
+function currentSavePath(job) {
+  return job.download_status?.save_path || job.actual_save_path;
+}
+function jobGroup(job) {
+  if (["failed", "uncertain"].includes(job.submission_status))
+    return "attention";
+  if (["queued", "processing"].includes(job.submission_status)) return "active";
+  const live = job.download_status;
+  if (
+    job.live_error ||
+    !live ||
+    !Number.isFinite(live.progress) ||
+    ["error", "missingFiles"].includes(live.state)
+  )
+    return "attention";
+  if (
+    currentSavePath(job) &&
+    currentSavePath(job).replace(/\/+$/, "") !==
+      job.save_path.replace(/\/+$/, "")
+  )
+    return "attention";
+  return Number.isFinite(live.progress) && live.progress >= 1
+    ? "completed"
+    : "active";
+}
+function filterJobs(filter) {
+  jobsFilter = filter;
+  jobsPage = 1;
+  renderJobs();
+}
+$("#job-filters").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-job-filter]");
+  if (target) filterJobs(target.dataset.jobFilter);
+});
+$("#jobs-clear-filter").addEventListener("click", () => filterJobs("all"));
+for (const [id, delta] of [
+  ["#jobs-prev", -1],
+  ["#jobs-next", 1],
+]) {
+  $(id).addEventListener("click", () => {
+    jobsPage += delta;
+    renderJobs();
+  });
+}
+for (const [id, delta] of [
+  ["#jobs-newer", -1],
+  ["#jobs-older", 1],
+]) {
+  $(id).addEventListener("click", () =>
+    busy($(id), async () => {
+      if (jobsLoading) await jobsLoading;
+      const previousOffset = jobsOffset;
+      jobsOffset = Math.max(0, jobsOffset + delta * JOB_BATCH_SIZE);
+      jobsPage = 1;
+      closeJobDetail(false);
+      if (!(await loadJobs())) jobsOffset = previousOffset;
+    }).then(() => renderJobs()),
+  );
+}
 async function fetchJobs() {
+  const generation = sessionGeneration;
   const refresh = $("#jobs-refresh-state");
-  let data;
   try {
-    data = await api("/downloads?limit=50&include_live=true");
+    let data = await api(
+      `/downloads?limit=${JOB_BATCH_SIZE}&offset=${jobsOffset}&include_live=true`,
+    );
+    if (jobsOffset > 0 && !data.items.length) {
+      const previousOffset = jobsOffset;
+      const fallbackOffset = Math.max(
+        0,
+        Math.floor(Math.max(0, data.total - 1) / JOB_BATCH_SIZE) *
+          JOB_BATCH_SIZE,
+      );
+      data = await api(
+        `/downloads?limit=${JOB_BATCH_SIZE}&offset=${fallbackOffset}&include_live=true`,
+      );
+      // Commit the fallback only after the replacement request succeeds.
+      if (jobsOffset === previousOffset) jobsOffset = fallbackOffset;
+    }
+    if (generation !== sessionGeneration) return false;
+    jobsData = data;
+    lastJobsUpdate = new Date().toLocaleTimeString();
+    refresh.classList.remove("error-text");
+    refresh.textContent = `最后更新 ${lastJobsUpdate} · 每 5 秒自动刷新`;
+    if (pendingHighlight) {
+      jobsFilter = "all";
+      const index = data.items.findIndex((job) => job.id === highlightedJobId);
+      if (index >= 0) jobsPage = Math.floor(index / JOB_PAGE_SIZE) + 1;
+    }
+    renderJobs();
+    return true;
   } catch (err) {
     refresh.classList.add("error-text");
     refresh.textContent = `刷新失败：${err.message}。${lastJobsUpdate ? `当前为 ${lastJobsUpdate} 的结果。` : "尚无可显示的结果。"}点击“刷新”重试。`;
-    return;
+    return false;
   }
-  lastJobsUpdate = new Date().toLocaleTimeString();
-  refresh.classList.remove("error-text");
-  refresh.textContent = `最后更新于 ${lastJobsUpdate} · 每 5 秒自动刷新`;
-  $("#jobs-empty").hidden = data.items.length > 0;
-  $("#jobs").replaceChildren();
+}
+function renderJobs() {
+  const focusedJob = $("#jobs").contains(document.activeElement)
+    ? document.activeElement.closest("tr")?.dataset.jobId
+    : null;
+  const data = jobsData;
+  const counts = {
+    all: data.items.length,
+    active: 0,
+    attention: 0,
+    completed: 0,
+  };
+  for (const job of data.items) counts[jobGroup(job)]++;
+  for (const node of document.querySelectorAll("[data-job-filter]")) {
+    node.setAttribute(
+      "aria-pressed",
+      String(node.dataset.jobFilter === jobsFilter),
+    );
+    node.querySelector("span").textContent = counts[node.dataset.jobFilter];
+  }
+  const filtered = data.items.filter(
+    (job) => jobsFilter === "all" || jobGroup(job) === jobsFilter,
+  );
+  const pages = Math.max(1, Math.ceil(filtered.length / JOB_PAGE_SIZE));
+  jobsPage = Math.max(1, Math.min(jobsPage, pages));
+  const visible = filtered.slice(
+    (jobsPage - 1) * JOB_PAGE_SIZE,
+    jobsPage * JOB_PAGE_SIZE,
+  );
+  $("#jobs-empty").hidden = filtered.length > 0;
+  $("#jobs-empty-text").textContent =
+    data.total === 0 ? "还没有提交记录" : "当前范围内没有符合条件的记录";
+  $("#jobs-search").hidden = data.total > 0;
+  $("#jobs-clear-filter").hidden = jobsFilter === "all";
+  $("#jobs-scope").textContent =
+    data.total > JOB_BATCH_SIZE
+      ? `筛选范围：全部 ${data.total} 条中的第 ${jobsOffset + 1}–${jobsOffset + data.items.length} 条。可在下方切换较新 / 更早记录。`
+      : "筛选范围：全部提交记录。需关注包含提交失败、待确认、进度不可用及目录不一致。";
   $("#jobs-count").textContent =
-    `共 ${data.total} 条记录，当前显示 ${data.items.length} 条。`;
-  for (const job of data.items) {
+    `共 ${data.total} 条记录 · 当前筛选 ${filtered.length} 条`;
+  $("#jobs-page-label").textContent = `第 ${jobsPage} / ${pages} 页`;
+  $("#jobs-prev").disabled = jobsPage <= 1;
+  $("#jobs-next").disabled = jobsPage >= pages;
+  $("#jobs-batches").hidden = data.total <= JOB_BATCH_SIZE;
+  $("#jobs-newer").disabled = jobsOffset === 0;
+  $("#jobs-older").disabled = jobsOffset + JOB_BATCH_SIZE >= data.total;
+  $("#jobs").replaceChildren();
+  for (const job of visible) {
     const row = element("tr");
     row.dataset.jobId = job.id;
     row.classList.toggle("highlighted-job", job.id === highlightedJobId);
-    const first = element("td", job.download_status?.name || job.torrent_id);
+    row.classList.toggle("selected-job", job.id === selectedJobId);
+    const title = element("td");
+    const name = element(
+      "p",
+      job.download_status?.name || job.torrent_id,
+      "job-name",
+    );
+    name.title = name.textContent;
+    title.append(name, element("p", date(job.created_at), "muted"));
     if (job.id === highlightedJobId)
-      first.append(element("p", "本次提交", "current-job"));
-    if (job.download_status?.name)
-      first.append(element("p", job.torrent_id, "muted"));
-    first.append(element("p", date(job.created_at), "muted"));
-    const path = element("td", job.actual_save_path || job.save_path);
-    if (job.actual_save_path && job.actual_save_path !== job.save_path)
-      path.append(element("p", "请求：" + job.save_path, "muted"));
+      title.append(element("p", "本次提交", "current-job"));
+    const path = element(
+      "td",
+      currentSavePath(job) || job.save_path,
+      "job-path",
+    );
+    if (currentSavePath(job) && currentSavePath(job) !== job.save_path)
+      path.append(element("p", "请求：" + job.save_path, "unsaved"));
     const state = element("td");
     state.append(
       element(
@@ -511,106 +674,287 @@ async function fetchJobs() {
         "badge status-" + job.submission_status,
       ),
     );
+    if (jobGroup(job) === "attention")
+      state.append(element("p", "需关注", "attention-label"));
     const action = element("td");
-    const actions = element("div", undefined, "actions");
-    actions.append(
-      button("查看", async () => {
-        const detail = await api("/downloads/" + job.id);
-        const box = $("#job-detail");
-        box.replaceChildren(
-          element("h3", detail.download_status?.name || detail.torrent_id),
-        );
-        box.append(
-          element(
-            "p",
-            `提交状态：${statusNames[detail.submission_status] || detail.submission_status}`,
-          ),
-        );
-        box.append(
-          element(
-            "p",
-            `保存目录：${detail.actual_save_path || detail.save_path}`,
-          ),
-        );
-        box.append(element("p", detail.message));
-        if (detail.submission_status === "uncertain")
-          box.append(
-            element(
-              "p",
-              "请先到 qBittorrent 核对任务是否存在，避免重复提交。",
-              "unsaved",
-            ),
-          );
-        if (detail.live_error)
-          box.append(element("p", detail.live_error.message, "error-text"));
-        box.append(
-          technicalDetails(detail),
-          button("收起详情", () => {
-            box.hidden = true;
-          }),
-        );
-        $("#job-detail").hidden = false;
-        await loadJobs();
-      }),
-    );
-    const remove = button(
-      "删除记录",
-      async () => {
-        const warning =
-          job.submission_status === "uncertain"
-            ? "该任务提交结果待确认，请先核对下载器。\n"
-            : "";
-        if (
-          !confirm(
-            warning +
-              "仅删除本应用的提交记录，不会删除 qBittorrent 任务或文件。确定删除？",
-          )
-        )
-          return;
-        await api("/downloads/" + job.id, { method: "DELETE" });
-        $("#job-detail").hidden = true;
-        $("#job-detail").textContent = "";
-        row.remove();
-        notice("提交记录已删除，下载器任务和文件不受影响");
-        // Discard any pre-deletion refresh before requesting the current list.
-        if (jobsLoading) await jobsLoading.catch(() => {});
-        await loadJobs();
-      },
-      "secondary danger",
-    );
-    remove.disabled = ["queued", "processing"].includes(job.submission_status);
-    if (remove.disabled) remove.title = "排队或提交中的记录暂不能删除";
-    actions.append(remove);
-    action.append(actions);
-    row.append(
-      first,
-      path,
-      state,
-      downloadProgress(job),
-      element(
-        "td",
-        job.message +
-          (job.submission_status === "uncertain"
-            ? " 请先到 qBittorrent 核对，避免重复提交。"
-            : ""),
-      ),
-      action,
-    );
+    const view = button("查看", () => openJobDetail(job.id));
+    view.setAttribute("aria-label", `查看 ${name.textContent}`);
+    view.setAttribute("aria-controls", "job-detail");
+    action.append(view);
+    row.append(title, path, state, downloadProgress(job), action);
     $("#jobs").append(row);
     if (job.id === highlightedJobId && pendingHighlight) {
       pendingHighlight = false;
-      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      row.scrollIntoView({
+        block: "nearest",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
     }
   }
   labelCells($("#jobs"));
+  if (focusedJob) {
+    const focusedRow = [...$("#jobs").rows].find(
+      (node) => node.dataset.jobId === focusedJob,
+    );
+    (focusedRow?.querySelector("button") || $("#refresh-jobs")).focus({
+      preventScroll: true,
+    });
+  }
 }
+function syncDrawerLayout() {
+  const box = $("#job-detail");
+  const dialog = $("#job-mobile-dialog");
+  if (mobileDrawer.matches && selectedJobId) {
+    if (box.parentElement !== dialog) dialog.append(box);
+    if (!dialog.open) dialog.showModal();
+    $("#jobs-workspace").classList.remove("has-detail");
+  } else {
+    if (dialog.open) dialog.close();
+    if (box.parentElement !== $("#jobs-workspace"))
+      $("#jobs-workspace").append(box);
+    $("#jobs-workspace").classList.toggle("has-detail", Boolean(selectedJobId));
+  }
+}
+mobileDrawer.addEventListener("change", syncDrawerLayout);
+function closeJobDetail(restoreFocus = true) {
+  selectedJobId = null;
+  drawerRequest++;
+  $("#job-detail").hidden = true;
+  syncDrawerLayout();
+  renderJobs();
+  if (restoreFocus) {
+    const row = [...$("#jobs").rows].find(
+      (node) => node.dataset.jobId === drawerReturnFocus,
+    );
+    (row?.querySelector("button") || $("#refresh-jobs")).focus();
+  }
+}
+$("#job-mobile-dialog").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeJobDetail();
+});
+document.addEventListener("keydown", (event) => {
+  if (
+    event.key === "Escape" &&
+    selectedJobId &&
+    !mobileDrawer.matches &&
+    !$("#download-dialog").open
+  )
+    closeJobDetail();
+});
+function drawerHeader() {
+  const header = element("div", undefined, "drawer-heading");
+  const title = element("h2", "任务详情");
+  title.id = "job-drawer-title";
+  const close = button("×", () => closeJobDetail(), "secondary drawer-close");
+  close.setAttribute("aria-label", "关闭任务详情");
+  header.append(title, close);
+  return header;
+}
+async function openJobDetail(id, focus = true) {
+  const version = ++drawerRequest;
+  drawerReturnFocus = id;
+  selectedJobId = id;
+  const box = $("#job-detail");
+  box.replaceChildren(
+    drawerHeader(),
+    element("p", "正在查询任务详情…", "muted"),
+  );
+  box.hidden = false;
+  box.setAttribute("aria-busy", "true");
+  syncDrawerLayout();
+  renderJobs();
+  if (focus) box.querySelector("button").focus();
+  try {
+    const detail = await api("/downloads/" + encodeURIComponent(id));
+    if (version !== drawerRequest) return;
+    const index = jobsData.items.findIndex((job) => job.id === id);
+    if (index >= 0) jobsData.items[index] = detail;
+    renderJobDetail(detail);
+    renderJobs();
+    if (focus) box.querySelector(".drawer-close").focus();
+    else box.querySelector(".drawer-refresh").focus();
+  } catch (err) {
+    if (version !== drawerRequest) return;
+    box.replaceChildren(
+      drawerHeader(),
+      element("p", `查询失败：${err.message}`, "error-text"),
+      button("重试查询", () => openJobDetail(id, false)),
+    );
+    box.querySelector("button:last-child").focus();
+  } finally {
+    if (version === drawerRequest) box.removeAttribute("aria-busy");
+  }
+}
+function renderJobDetail(job) {
+  const box = $("#job-detail");
+  box.replaceChildren(
+    drawerHeader(),
+    element(
+      "h3",
+      job.download_status?.name || job.torrent_id,
+      "drawer-resource",
+    ),
+    element("p", "提交 ID " + job.id, "muted"),
+  );
+  const needsAttention = jobGroup(job) === "attention";
+  if (needsAttention) {
+    const warning = element("div", undefined, "job-warning");
+    warning.append(
+      element(
+        "strong",
+        job.submission_status === "uncertain"
+          ? "提交结果待确认"
+          : "此任务需要关注",
+      ),
+      element("p", job.message),
+    );
+    if (job.submission_status === "uncertain")
+      warning.append(
+        element(
+          "p",
+          "先按 hash 核对下载器，避免重复提交。未找到任务不代表提交失败。",
+        ),
+      );
+    if (job.live_error) warning.append(element("p", job.live_error.message));
+    if (
+      currentSavePath(job) &&
+      currentSavePath(job).replace(/\/+$/, "") !==
+        job.save_path.replace(/\/+$/, "")
+    )
+      warning.append(
+        element("p", "实际保存目录与请求目录不一致，请检查下载器设置。"),
+      );
+    if (
+      !["uncertain", "failed"].includes(job.submission_status) &&
+      !job.live_error &&
+      (!job.download_status || !Number.isFinite(job.download_status.progress))
+    )
+      warning.append(
+        element("p", "下载进度暂不可用，请重新查询并检查下载器状态。"),
+      );
+    if (
+      job.download_status &&
+      ["error", "missingFiles"].includes(job.download_status.state)
+    )
+      warning.append(element("p", "请到 qBittorrent 检查文件与下载器状态。"));
+    if (job.submission_status === "failed")
+      warning.append(
+        element("p", "请先检查连接设置与失败原因，本页不会自动重新提交。"),
+      );
+    box.append(warning);
+  }
+  box.append(
+    button(
+      job.submission_status === "uncertain" ? "重新核对下载器" : "刷新任务详情",
+      () => openJobDetail(job.id, false),
+      "primary drawer-refresh",
+    ),
+  );
+  if (needsAttention)
+    box.append(
+      button("前往连接设置", () => {
+        closeJobDetail(false);
+        return tab("settings");
+      }),
+    );
+  const facts = element("dl", undefined, "job-facts");
+  for (const [label, value] of [
+    ["提交状态", statusNames[job.submission_status]],
+    ["请求目录", job.save_path],
+    ["实际目录", currentSavePath(job) || "尚未获取"],
+    ["初始状态", job.start_paused ? "添加后暂停" : "添加后开始"],
+    ["提交时间", date(job.created_at)],
+    ["记录更新", date(job.updated_at)],
+    ["详情查询", new Date().toLocaleString()],
+  ])
+    facts.append(element("dt", label), element("dd", value));
+  box.append(facts);
+  if (job.download_status) {
+    box.append(element("h3", "实际下载状态"));
+    const progress = downloadProgress(job);
+    const wrap = element("div", undefined, "drawer-progress");
+    wrap.append(...progress.childNodes);
+    box.append(wrap);
+  }
+  const timeline = element("ol", undefined, "job-timeline");
+  timeline.append(
+    element("li", `请求已接收 · ${date(job.created_at)}`),
+    element(
+      "li",
+      `${statusNames[job.submission_status]} · 记录更新于 ${date(job.updated_at)}`,
+    ),
+  );
+  box.append(
+    element("h3", "处理记录"),
+    timeline,
+    element("p", "仅显示已记录的状态；详情为本次查询结果。", "muted"),
+    technicalDetails(job),
+  );
+  const remove = button(
+    "删除提交记录",
+    () => deleteJobRecord(job),
+    "secondary danger drawer-delete",
+  );
+  remove.disabled = ["queued", "processing"].includes(job.submission_status);
+  if (remove.disabled) remove.title = "排队或提交中的记录暂不能删除";
+  box.append(
+    remove,
+    element("p", "仅删除记录，不影响下载器任务或文件。", "muted"),
+  );
+}
+async function deleteJobRecord(job) {
+  if (
+    !confirm(
+      (job.submission_status === "uncertain"
+        ? "该任务结果待确认，请先核对下载器。\n"
+        : "") +
+        "仅删除本应用的提交记录，不会删除 qBittorrent 任务或文件。确定删除？",
+    )
+  )
+    return;
+  await api("/downloads/" + encodeURIComponent(job.id), { method: "DELETE" });
+  if (selectedJobId === job.id) closeJobDetail();
+  if (jobsLoading) await jobsLoading;
+  await loadJobs();
+  notice("提交记录已删除，下载器任务和文件不受影响");
+}
+function renderServiceStatus() {
+  $("#service-status").replaceChildren();
+  for (const [service, name] of [
+    ["mteam", "M-Team"],
+    ["qbittorrent", "qBittorrent"],
+  ]) {
+    const test = connectionTests[service];
+    const label = !test
+      ? "未测试"
+      : test.state === "stale"
+        ? "配置已修改，需重测"
+        : test.state === "testing"
+          ? "正在测试…"
+          : test.state === "success"
+            ? "上次测试成功"
+            : "上次测试失败";
+    const pill = button("", () => tab("settings"), "secondary service-pill");
+    pill.append(
+      element("strong", name),
+      element("span", label, `service-${test?.state || "unknown"}`),
+    );
+    if (test?.at) pill.append(element("span", test.at, "muted"));
+    $("#service-status").append(pill);
+  }
+}
+renderServiceStatus();
 $("#refresh-jobs").addEventListener("click", () =>
   busy($("#refresh-jobs"), loadJobs),
 );
 setInterval(() => {
-  if (!$("#application").hidden && !$("#jobs-panel").hidden)
+  if (!document.hidden && !$("#application").hidden && !$("#jobs-panel").hidden)
     loadJobs().catch(() => {});
 }, 5000);
+
 function labelCells(body) {
   const headers = [...body.closest("table").querySelectorAll("th")].map(
     (node) => node.textContent,
@@ -665,6 +1009,11 @@ formAction("#settings-form", async (form) => {
   form.qb_password.value = "";
   settingsSnapshot = JSON.stringify([...new FormData(form)]);
   updateDirty();
+  settingsRevision++;
+  for (const service of Object.keys(connectionTests))
+    connectionTests[service] = { state: "stale" };
+  renderServiceStatus();
+  $("#connection-result").hidden = true;
   notice("连接设置已保存，请分别测试两个服务的连接");
   await loadSetupGuide();
 });
@@ -682,10 +1031,14 @@ for (const [selector, service] of [
       const name = service === "mteam" ? "M-Team" : "qBittorrent";
       box.hidden = false;
       box.replaceChildren(element("p", `正在测试已保存的 ${name} 连接…`));
+      const testRevision = settingsRevision;
+      connectionTests[service] = { state: "testing" };
+      renderServiceStatus();
       try {
         const result = await api("/admin/connections/" + service + "/test", {
           method: "POST",
         });
+        if (testRevision !== settingsRevision) return;
         box.replaceChildren(element("h3", `${name} 连接成功`));
         if (result.version) box.append(element("p", `版本：${result.version}`));
         if (result.username)
@@ -697,12 +1050,23 @@ for (const [selector, service] of [
               `默认保存目录：${result.default_save_path}（未验证写入权限）`,
             ),
           );
+        connectionTests[service] = {
+          state: "success",
+          at: new Date().toLocaleTimeString(),
+        };
+        renderServiceStatus();
         notice(`${name} 连接测试成功`);
         box.append(
           element("p", `测试时间：${new Date().toLocaleTimeString()}`, "muted"),
           technicalDetails(result),
         );
       } catch (err) {
+        if (testRevision !== settingsRevision) return;
+        connectionTests[service] = {
+          state: "failed",
+          at: new Date().toLocaleTimeString(),
+        };
+        renderServiceStatus();
         box.replaceChildren(
           element("h3", `${name} 连接失败`),
           element("p", err.message, "error-text"),

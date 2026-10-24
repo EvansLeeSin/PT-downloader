@@ -198,3 +198,30 @@ def test_no_live_connection_for_active_or_changed_downloader(configured, monkeyp
     monkeypatch.setattr("app.main.QbClient", factory)
     assert configured.get("/api/v1/downloads?include_live=true").status_code == 200
     factory.assert_not_called()
+
+
+@pytest.mark.parametrize("found", [True, False])
+def test_manual_detail_recheck_never_resubmits_uncertain_job(configured, monkeypatch, found):
+    job = make_job(configured, status="uncertain", hashes=["a" * 40])
+    qb = MagicMock()
+    qb.find.return_value = (
+        {"hash": "a" * 40, "save_path": "/downloads", "state": "downloading", "progress": 0.3}
+        if found
+        else None
+    )
+    monkeypatch.setattr("app.main.QbClient", lambda config: qb)
+    response = configured.get("/api/v1/downloads/" + job["id"])
+    assert response.status_code == 200
+    result = response.json()
+    assert result["submission_status"] == ("added" if found else "uncertain")
+    assert (
+        configured.app.state.store.job(job["id"])["submission_status"]
+        == result["submission_status"]
+    )
+    if found:
+        assert result["download_status"]["progress"] == 0.3
+    else:
+        assert result["live_error"]["code"] == "TORRENT_NOT_FOUND"
+    qb.find.assert_called_once_with({"a" * 40})
+    qb.add.assert_not_called()
+    qb.close.assert_called_once()
