@@ -352,3 +352,239 @@ dialog label {
     margin-left: 0;
   }
 }
+
+/* Feedback and task hierarchy */
+button:disabled {
+  cursor: not-allowed;
+}
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 3px;
+}
+.setup-guide {
+  border-left: 4px solid #2563eb;
+  background: #f8fbff;
+}
+.setup-guide ol {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding-left: 24px;
+  color: #475569;
+  line-height: 1.8;
+}
+.setup-guide h2 {
+  margin-bottom: 0;
+}
+.error-text {
+  color: #b91c1c;
+}
+.unsaved {
+  color: #92400e;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: #fffbeb;
+}
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: #64748b;
+}
+.resource-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+#results[aria-busy="true"] {
+  opacity: 0.5;
+}
+.highlighted-job {
+  background: #eff6ff;
+}
+.highlighted-job td:first-child {
+  border-left: 3px solid #2563eb;
+}
+.current-job {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.badge.status-added,
+.badge.status-exists {
+  color: #087f5b;
+  background: #e5f7ee;
+}
+.badge.status-uncertain {
+  color: #92400e;
+  background: #fef3c7;
+}
+.badge.status-failed {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+.detail-panel {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 18px;
+  border-radius: 10px;
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}
+.detail-panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+.detail-panel details {
+  margin: 16px 0;
+}
+summary {
+  cursor: pointer;
+  color: #475569;
+}
+.location-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto auto minmax(0, 1fr);
+}
+.location-advanced {
+  grid-column: 5;
+  grid-row: 1;
+  align-self: center;
+  font-size: 12px;
+}
+.location-row > label:nth-child(2) {
+  grid-column: 1;
+  grid-row: 1;
+}
+.location-row > label:nth-child(3) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.location-row > label:nth-child(4) {
+  grid-column: 3;
+  grid-row: 1;
+}
+.location-row > button {
+  grid-column: 4;
+  grid-row: 1;
+}
+.location-advanced label {
+  margin-top: 10px;
+}
+#copy-feedback {
+  margin-left: 10px;
+}
+#download-title {
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}
+@media (max-width: 720px) {
+  .setup-guide .section-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .setup-guide ol {
+    display: grid;
+    gap: 8px;
+  }
+  .table-wrap {
+    overflow: visible;
+  }
+  table,
+  tbody {
+    display: block;
+  }
+  thead {
+    display: none;
+  }
+  tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 18px 0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  td {
+    display: block;
+    padding: 0;
+    border: none;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  td:first-child {
+    flex: 0 0 100%;
+    min-width: 0;
+  }
+  td[data-label]:not(:first-child)::before {
+    content: attr(data-label);
+    display: block;
+    color: #64748b;
+    font-size: 11px;
+    margin-bottom: 5px;
+  }
+  td:last-child {
+    flex: 0 0 100%;
+  }
+  td:last-child::before {
+    display: none !important;
+  }
+  td:last-child button {
+    min-height: 42px;
+  }
+  .highlighted-job {
+    padding: 14px;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+  }
+  .highlighted-job td:first-child {
+    border: none;
+  }
+  #jobs td:nth-child(2),
+  #jobs td:nth-child(5) {
+    flex: 0 0 100%;
+  }
+  .download-progress {
+    min-width: 0;
+    flex: 1;
+  }
+  .download-progress progress {
+    width: 100%;
+    min-width: 130px;
+  }
+  .location-row {
+    grid-template-columns: 1fr auto;
+    padding-bottom: 18px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .location-row > label:nth-child(2) {
+    grid-column: 1/-1;
+    grid-row: 1;
+  }
+  .location-row > label:nth-child(3) {
+    grid-column: 1/-1;
+    grid-row: 2;
+  }
+  .location-row > label:nth-child(4) {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .location-row > button {
+    grid-column: 2;
+    grid-row: 3;
+  }
+  .location-advanced {
+    grid-column: 1/-1;
+    grid-row: 4;
+  }
+  .token-item {
+    align-items: flex-start;
+  }
+  .token-item > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}

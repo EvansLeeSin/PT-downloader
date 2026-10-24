@@ -40,6 +40,23 @@
           ><button data-tab="tokens">API 令牌</button
           ><button id="logout" class="quiet">退出登录</button>
         </nav>
+        <section
+          id="setup-guide"
+          class="card setup-guide"
+          hidden
+          aria-labelledby="setup-title"
+        >
+          <div class="section-title">
+            <h2 id="setup-title">先连接服务，开始第一次搜索</h2>
+            <button id="setup-open" class="secondary" type="button">
+              前往连接设置
+            </button>
+          </div>
+          <p class="muted">
+            保存连接信息后分别测试连接，再确认 qBittorrent 内的保存目录。
+          </p>
+          <ol id="setup-steps"></ol>
+        </section>
         <section id="search-panel" class="card tab-panel">
           <form id="search-form" class="search-bar">
             <input
@@ -56,8 +73,9 @@
             ><button type="submit">搜索</button>
           </form>
           <p class="muted">
-            综合与成人分区分别检索；找不到资源时请确认搜索范围。站点优惠可能变化，提交前请核对。首次使用请先配置连接信息。
+            综合与成人分区分别检索。站点优惠可能变化，提交前请核对。
           </p>
+          <p id="search-feedback" class="muted" role="status" hidden></p>
           <div class="table-wrap">
             <table>
               <thead>
@@ -92,6 +110,7 @@
             秒刷新；“已添加”不等于下载完成，待确认的任务不会自动重新提交。删除记录不会删除
             qBittorrent 任务或文件，排队和提交中暂不能删除。
           </p>
+          <p id="jobs-refresh-state" class="muted" role="status">尚未刷新</p>
           <div class="table-wrap">
             <table>
               <thead>
@@ -107,12 +126,27 @@
               <tbody id="jobs"></tbody>
             </table>
           </div>
+
+          <div id="jobs-empty" class="empty-state" hidden>
+            <p>还没有提交记录</p>
+            <button id="jobs-search" class="secondary" type="button">
+              去搜索资源
+            </button>
+          </div>
           <p id="jobs-count" class="muted"></p>
-          <pre id="job-detail" hidden></pre>
+          <section
+            id="job-detail"
+            class="detail-panel"
+            hidden
+            aria-label="任务详情"
+          ></section>
         </section>
         <section id="settings-panel" class="tab-panel" hidden>
           <div class="card">
             <h2>连接设置</h2>
+            <p id="settings-dirty" class="unsaved" role="status" hidden>
+              有未保存的修改。请先保存，再测试新配置。
+            </p>
             <p class="muted">
               密钥与密码加密保存，不会回显。留空保留已有值。更换前请等待排队任务处理完。
             </p>
@@ -164,7 +198,12 @@
                 </button>
               </div>
             </form>
-            <pre id="connection-result" hidden></pre>
+            <section
+              id="connection-result"
+              class="detail-panel"
+              hidden
+              aria-label="连接测试结果"
+            ></section>
           </div>
           <div class="card">
             <div class="section-title">
@@ -233,7 +272,12 @@
             </div>
             <button type="submit">创建令牌</button>
           </form>
-          <pre id="new-token" hidden></pre>
+          <div id="token-reveal" hidden>
+            <pre id="new-token" hidden></pre>
+            <button id="copy-token" type="button" class="secondary">
+              复制令牌</button
+            ><span id="copy-feedback" class="muted" role="status"></span>
+          </div>
           <div id="token-list"></div>
         </section>
       </div>
@@ -242,6 +286,7 @@
       <form id="download-form">
         <h2>添加下载</h2>
         <p id="download-title"></p>
+        <p id="download-summary" class="muted"></p>
         <label>保存目录<select name="location_id" required></select></label
         ><label class="check"
           ><input type="checkbox" name="start_paused" />添加后暂停</label
@@ -250,7 +295,7 @@
           仅添加任务，不会修改已有同种任务。网络异常后可用同一次操作重试。
         </p>
         <div class="actions">
-          <button type="submit">确认添加</button
+          <button type="submit">添加到 qBittorrent</button
           ><button type="button" id="cancel-download" class="secondary">
             取消
           </button>

@@ -9,6 +9,76 @@ let searchState = null;
 let page = 1;
 let selection = null;
 let noticeTimer;
+let searchLoading = false;
+let highlightedJobId = null;
+let pendingHighlight = false;
+let settingsSnapshot = null;
+let locationsSnapshot = null;
+let lastJobsUpdate = null;
+let tokenValue = "";
+const scopeNames = {
+  "search:read": "搜索资源",
+  "downloads:read": "目录与状态查询",
+  "downloads:create": "添加下载",
+  "downloads:delete": "删除提交记录",
+};
+function settingsDirty() {
+  return (
+    settingsSnapshot !== null &&
+    settingsSnapshot !== JSON.stringify([...new FormData($("#settings-form"))])
+  );
+}
+function locationFingerprint() {
+  return JSON.stringify(
+    [...document.querySelectorAll(".location-row input")].map((input) => [
+      input.name,
+      input.value,
+      input.checked,
+    ]),
+  );
+}
+function locationsDirty() {
+  return (
+    locationsSnapshot !== null && locationsSnapshot !== locationFingerprint()
+  );
+}
+function updateDirty() {
+  $("#settings-dirty").hidden = !settingsDirty();
+  for (const id of ["#test-mteam", "#test-qb"])
+    $(id).disabled = settingsDirty();
+}
+$("#settings-form").addEventListener("input", updateDirty);
+window.addEventListener("beforeunload", (event) => {
+  if (settingsDirty() || locationsDirty()) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+function technicalDetails(data) {
+  const details = element("details");
+  details.append(
+    element("summary", "技术详情"),
+    element("pre", JSON.stringify(data, null, 2)),
+  );
+  return details;
+}
+async function loadSetupGuide() {
+  const data = await api("/admin/settings");
+  const site = Boolean(data.site_api_key_configured);
+  const qb = Boolean(
+    data.qb_url && data.qb_username && data.qb_password_configured,
+  );
+  $("#setup-guide").hidden = site && qb;
+  $("#setup-steps").replaceChildren(
+    element("li", `${site ? "已保存" : "待配置"} · M-Team API 地址与密钥`),
+    element("li", `${qb ? "已保存" : "待配置"} · qBittorrent WebUI 连接`),
+    element("li", "确认保存目录 · 使用下载器容器内路径"),
+  );
+}
+$("#setup-open").addEventListener("click", () =>
+  busy($("#setup-open"), () => tab("settings")),
+);
+$("#jobs-search").addEventListener("click", () => tab("search"));
 const statusNames = {
   queued: "排队中",
   processing: "处理中",
@@ -42,8 +112,11 @@ async function api(path, options = {}) {
   return data;
 }
 function showLogin() {
+  settingsSnapshot = locationsSnapshot = null;
   if ($("#download-dialog").open) $("#download-dialog").close();
   $("#new-token").textContent = "";
+  tokenValue = "";
+  $("#token-reveal").hidden = true;
   $("#new-token").hidden = true;
   $("#application").hidden = true;
   $("#login-panel").hidden = false;
@@ -95,6 +168,22 @@ function date(seconds) {
   return new Date(seconds * 1000).toLocaleString();
 }
 async function tab(name) {
+  if (
+    !$("#settings-panel").hidden &&
+    name !== "settings" &&
+    (settingsDirty() || locationsDirty())
+  ) {
+    if (!confirm("连接或目录有未保存的修改，离开将放弃这些修改。继续？"))
+      return;
+    settingsSnapshot = null;
+    locationsSnapshot = null;
+  }
+  if (
+    name === "settings" &&
+    !$("#settings-panel").hidden &&
+    (settingsDirty() || locationsDirty())
+  )
+    return;
   document.querySelectorAll(".tab-panel").forEach((node) => {
     node.hidden = node.id !== name + "-panel";
   });
@@ -121,92 +210,145 @@ formAction("#login-form", async (form) => {
   });
   form.reset();
   showApplication();
+  await loadSetupGuide();
 });
 $("#logout").addEventListener("click", () =>
   busy($("#logout"), async () => {
+    if (
+      (settingsDirty() || locationsDirty()) &&
+      !confirm("有未保存的修改，确定退出登录？")
+    )
+      return;
     await api("/auth/logout", { method: "POST" });
     $("#new-token").textContent = "";
+    tokenValue = "";
+    $("#token-reveal").hidden = true;
     showLogin();
   }),
 );
 formAction("#search-form", async (form) => {
-  searchState = {
+  if (searchLoading) return;
+  const criteria = {
     keyword: form.keyword.value.trim(),
     mode: form.mode.value,
     free_only: form.free_only.checked,
   };
-  page = 1;
-  await search();
+  await search(1, criteria);
 });
-async function search() {
-  const params = new URLSearchParams({ ...searchState, page, page_size: 20 });
-  const result = await api("/torrents/search?" + params);
-  $("#results").replaceChildren();
-  for (const item of result.items) {
-    const row = element("tr");
-    const title = element("td");
-    const link = element("a", item.title);
-    link.href = item.detail_url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    title.append(link);
-    if (item.description) title.append(element("p", item.description, "muted"));
-    if (item.labels.length)
-      title.append(element("p", item.labels.join(" · "), "muted"));
-    const promo = item.promotion;
-    const promoCell = element("td");
-    const text =
-      promo.type === "free"
-        ? "免费"
-        : promo.type === "discount"
-          ? `${promo.download_factor * 100}% 计费`
-          : promo.type === "normal"
-            ? "普通"
-            : "待核对";
-    promoCell.append(
-      element("span", text, "badge " + (promo.type === "free" ? "free" : "")),
-    );
-    if (promo.expires_at)
-      promoCell.append(
-        element(
+async function search(targetPage = page, criteria = searchState) {
+  if (searchLoading) return;
+  searchLoading = true;
+  const feedback = $("#search-feedback");
+  const submit = $("#search-form button[type=submit]");
+  const previousText = submit.textContent;
+  submit.disabled = true;
+  submit.textContent = "搜索中…";
+  $("#results").setAttribute("aria-busy", "true");
+  feedback.hidden = false;
+  feedback.classList.remove("error-text");
+  feedback.textContent = "正在搜索，下面的已有结果将在完成后更新…";
+  $("#prev-page").disabled = $("#next-page").disabled = true;
+  try {
+    const params = new URLSearchParams({
+      ...criteria,
+      page: targetPage,
+      page_size: 20,
+    });
+    const result = await api("/torrents/search?" + params);
+    page = result.page;
+    searchState = criteria;
+    $("#results").replaceChildren();
+    for (const item of result.items) {
+      const row = element("tr");
+      const title = element("td");
+      const link = element("a", item.title);
+      link.href = item.detail_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      title.append(link);
+      if (item.description) {
+        const description = element(
           "p",
-          "截至 " + new Date(promo.expires_at).toLocaleString(),
-          "muted",
-        ),
+          item.description,
+          "muted resource-description",
+        );
+        description.title = item.description;
+        title.append(description);
+      }
+      if (item.labels.length)
+        title.append(element("p", item.labels.join(" · "), "muted"));
+      const promo = item.promotion;
+      const promoCell = element("td");
+      const text =
+        promo.type === "free"
+          ? "免费"
+          : promo.type === "discount"
+            ? `${promo.download_factor * 100}% 计费`
+            : promo.type === "normal"
+              ? "普通"
+              : "待核对";
+      promoCell.append(
+        element("span", text, "badge " + (promo.type === "free" ? "free" : "")),
       );
-    const action = element("td");
-    action.append(button("下载", () => openDownload(item), "primary"));
-    row.append(
-      title,
-      element("td", size(item.size_bytes)),
-      element("td", `${item.seeders} / ${item.leechers}`),
-      promoCell,
-      action,
-    );
-    $("#results").append(row);
+      if (promo.expires_at)
+        promoCell.append(
+          element(
+            "p",
+            "截至 " + new Date(promo.expires_at).toLocaleString(),
+            "muted",
+          ),
+        );
+      const action = element("td");
+      action.append(button("下载", () => openDownload(item), "primary"));
+      row.append(
+        title,
+        element("td", size(item.size_bytes)),
+        element(
+          "td",
+          `${item.seeders} / ${item.leechers}${item.seeders === 0 ? " · 暂无做种" : ""}`,
+        ),
+        promoCell,
+        action,
+      );
+      $("#results").append(row);
+    }
+    if (!result.items.length) {
+      const row = element("tr");
+      const cell = element(
+        "td",
+        "未找到资源。试试更短的关键词、切换综合 / 成人分区，或取消免费筛选。",
+        "muted empty-state",
+      );
+      cell.colSpan = 5;
+      row.append(cell);
+      $("#results").append(row);
+    }
+    feedback.textContent = `“${searchState.keyword}” · ${searchState.mode === "adult" ? "成人" : "综合"}${searchState.free_only ? " · 免费筛选" : ""} · 本页 ${result.items.length} 条${Number.isFinite(result.total) ? ` / 共 ${result.total} 条` : ""}`;
+    labelCells($("#results"));
+    $("#page-label").textContent = `第 ${result.page} 页`;
+    $("#prev-page").disabled = result.page <= 1;
+    $("#next-page").disabled = !result.has_more;
+  } catch (err) {
+    feedback.textContent = `搜索失败：${err.message}。下方保留上次结果，请重试。`;
+    feedback.classList.add("error-text");
+    $("#prev-page").disabled = !searchState || page <= 1;
+    $("#next-page").disabled = true;
+  } finally {
+    searchLoading = false;
+    submit.disabled = false;
+    submit.textContent = previousText;
+    $("#results").removeAttribute("aria-busy");
   }
-  if (!result.items.length) {
-    const row = element("tr");
-    const cell = element("td", "未找到资源", "muted");
-    cell.colSpan = 5;
-    row.append(cell);
-    $("#results").append(row);
-  }
-  $("#page-label").textContent = `第 ${result.page} 页`;
-  $("#prev-page").disabled = result.page <= 1;
-  $("#next-page").disabled = !result.has_more;
 }
 for (const [selector, delta] of [
   ["#prev-page", -1],
   ["#next-page", 1],
 ])
   $(selector).addEventListener("click", async () => {
-    const before = page;
-    page += delta;
+    if (searchLoading) return;
     try {
-      await search();
+      await search(page + delta);
     } catch (err) {
-      page = before;
       notice(err.message, true);
     }
   });
@@ -222,6 +364,9 @@ async function openDownload(item) {
   }
   selection = { id: item.id, key: uniqueId() };
   $("#download-title").textContent = item.title;
+  $("#download-summary").textContent =
+    `${size(item.size_bytes)} · ${item.promotion.type === "free" ? "免费" : item.promotion.type === "discount" ? `${item.promotion.download_factor * 100}% 计费` : "优惠请以站点当前状态为准"} · ${item.seeders} 人做种`;
+  $("#download-form button[type=submit]").textContent = "添加到 qBittorrent";
   $("#download-form").start_paused.checked = false;
   $("#download-dialog").showModal();
 }
@@ -239,11 +384,34 @@ formAction("#download-form", async (form) => {
   if (selection.fingerprint && selection.fingerprint !== fingerprint)
     selection.key = uniqueId();
   selection.fingerprint = fingerprint;
-  const result = await api("/downloads", {
-    method: "POST",
-    headers: { "Idempotency-Key": selection.key },
-    body: fingerprint,
+  const submit = form.querySelector("button[type=submit]");
+  submit.textContent = "正在提交…";
+  let result;
+  const controls = [
+    ...form.querySelectorAll("select, input, #cancel-download"),
+  ];
+  controls.forEach((node) => {
+    node.disabled = true;
   });
+  const preventClose = (event) => event.preventDefault();
+  $("#download-dialog").addEventListener("cancel", preventClose);
+  try {
+    result = await api("/downloads", {
+      method: "POST",
+      headers: { "Idempotency-Key": selection.key },
+      body: fingerprint,
+    });
+  } catch (err) {
+    submit.textContent = "重试本次提交";
+    throw err;
+  } finally {
+    controls.forEach((node) => {
+      node.disabled = false;
+    });
+    $("#download-dialog").removeEventListener("cancel", preventClose);
+  }
+  highlightedJobId = result.id;
+  pendingHighlight = true;
   $("#download-dialog").close();
   notice(result.message);
   await tab("jobs");
@@ -306,12 +474,29 @@ function downloadProgress(job) {
   return cell;
 }
 async function fetchJobs() {
-  const data = await api("/downloads?limit=50&include_live=true");
+  const refresh = $("#jobs-refresh-state");
+  let data;
+  try {
+    data = await api("/downloads?limit=50&include_live=true");
+  } catch (err) {
+    refresh.classList.add("error-text");
+    refresh.textContent = `刷新失败：${err.message}。${lastJobsUpdate ? `当前为 ${lastJobsUpdate} 的结果。` : "尚无可显示的结果。"}点击“刷新”重试。`;
+    return;
+  }
+  lastJobsUpdate = new Date().toLocaleTimeString();
+  refresh.classList.remove("error-text");
+  refresh.textContent = `最后更新于 ${lastJobsUpdate} · 每 5 秒自动刷新`;
+  $("#jobs-empty").hidden = data.items.length > 0;
   $("#jobs").replaceChildren();
-  $("#jobs-count").textContent = `共 ${data.total} 条记录，显示最近 50 条。`;
+  $("#jobs-count").textContent =
+    `共 ${data.total} 条记录，当前显示 ${data.items.length} 条。`;
   for (const job of data.items) {
     const row = element("tr");
+    row.dataset.jobId = job.id;
+    row.classList.toggle("highlighted-job", job.id === highlightedJobId);
     const first = element("td", job.download_status?.name || job.torrent_id);
+    if (job.id === highlightedJobId)
+      first.append(element("p", "本次提交", "current-job"));
     if (job.download_status?.name)
       first.append(element("p", job.torrent_id, "muted"));
     first.append(element("p", date(job.created_at), "muted"));
@@ -323,7 +508,7 @@ async function fetchJobs() {
       element(
         "span",
         statusNames[job.submission_status] || job.submission_status,
-        "badge",
+        "badge status-" + job.submission_status,
       ),
     );
     const action = element("td");
@@ -331,7 +516,39 @@ async function fetchJobs() {
     actions.append(
       button("查看", async () => {
         const detail = await api("/downloads/" + job.id);
-        $("#job-detail").textContent = JSON.stringify(detail, null, 2);
+        const box = $("#job-detail");
+        box.replaceChildren(
+          element("h3", detail.download_status?.name || detail.torrent_id),
+        );
+        box.append(
+          element(
+            "p",
+            `提交状态：${statusNames[detail.submission_status] || detail.submission_status}`,
+          ),
+        );
+        box.append(
+          element(
+            "p",
+            `保存目录：${detail.actual_save_path || detail.save_path}`,
+          ),
+        );
+        box.append(element("p", detail.message));
+        if (detail.submission_status === "uncertain")
+          box.append(
+            element(
+              "p",
+              "请先到 qBittorrent 核对任务是否存在，避免重复提交。",
+              "unsaved",
+            ),
+          );
+        if (detail.live_error)
+          box.append(element("p", detail.live_error.message, "error-text"));
+        box.append(
+          technicalDetails(detail),
+          button("收起详情", () => {
+            box.hidden = true;
+          }),
+        );
         $("#job-detail").hidden = false;
         await loadJobs();
       }),
@@ -370,11 +587,22 @@ async function fetchJobs() {
       path,
       state,
       downloadProgress(job),
-      element("td", job.message),
+      element(
+        "td",
+        job.message +
+          (job.submission_status === "uncertain"
+            ? " 请先到 qBittorrent 核对，避免重复提交。"
+            : ""),
+      ),
       action,
     );
     $("#jobs").append(row);
+    if (job.id === highlightedJobId && pendingHighlight) {
+      pendingHighlight = false;
+      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
   }
+  labelCells($("#jobs"));
 }
 $("#refresh-jobs").addEventListener("click", () =>
   busy($("#refresh-jobs"), loadJobs),
@@ -383,6 +611,14 @@ setInterval(() => {
   if (!$("#application").hidden && !$("#jobs-panel").hidden)
     loadJobs().catch(() => {});
 }, 5000);
+function labelCells(body) {
+  const headers = [...body.closest("table").querySelectorAll("th")].map(
+    (node) => node.textContent,
+  );
+  for (const row of body.rows)
+    for (const [i, cell] of [...row.cells].entries())
+      if (cell.colSpan === 1) cell.dataset.label = headers[i];
+}
 async function loadSettings() {
   const form = $("#settings-form");
   form.hidden = true;
@@ -407,6 +643,9 @@ async function loadSettings() {
     const locations = await api("/download-locations");
     $("#location-rows").replaceChildren();
     locations.items.forEach(addLocationRow);
+    settingsSnapshot = JSON.stringify([...new FormData(form)]);
+    locationsSnapshot = locationFingerprint();
+    updateDirty();
   } finally {
     form.hidden = false;
     $("#locations-form").hidden = false;
@@ -418,10 +657,16 @@ formAction("#settings-form", async (form) => {
   body.site_api_key = body.site_api_key || null;
   body.qb_password = body.qb_password || null;
   await api("/admin/settings", { method: "PUT", body: JSON.stringify(body) });
+  if (form.site_api_key.value)
+    form.site_api_key.placeholder = "已配置（留空保留）";
+  if (form.qb_password.value)
+    form.qb_password.placeholder = "已配置（留空保留）";
   form.site_api_key.value = "";
   form.qb_password.value = "";
-  notice("连接设置已保存");
-  await loadSettings();
+  settingsSnapshot = JSON.stringify([...new FormData(form)]);
+  updateDirty();
+  notice("连接设置已保存，请分别测试两个服务的连接");
+  await loadSetupGuide();
 });
 for (const [selector, service] of [
   ["#test-mteam", "mteam"],
@@ -429,12 +674,46 @@ for (const [selector, service] of [
 ])
   $(selector).addEventListener("click", () =>
     busy($(selector), async () => {
-      const result = await api("/admin/connections/" + service + "/test", {
-        method: "POST",
-      });
-      $("#connection-result").textContent = JSON.stringify(result, null, 2);
-      $("#connection-result").hidden = false;
-      notice("连接测试成功");
+      if (settingsDirty()) {
+        notice("请先保存连接设置，再测试新配置", true);
+        return;
+      }
+      const box = $("#connection-result");
+      const name = service === "mteam" ? "M-Team" : "qBittorrent";
+      box.hidden = false;
+      box.replaceChildren(element("p", `正在测试已保存的 ${name} 连接…`));
+      try {
+        const result = await api("/admin/connections/" + service + "/test", {
+          method: "POST",
+        });
+        box.replaceChildren(element("h3", `${name} 连接成功`));
+        if (result.version) box.append(element("p", `版本：${result.version}`));
+        if (result.username)
+          box.append(element("p", `账号：${result.username}`));
+        if (result.default_save_path)
+          box.append(
+            element(
+              "p",
+              `默认保存目录：${result.default_save_path}（未验证写入权限）`,
+            ),
+          );
+        notice(`${name} 连接测试成功`);
+        box.append(
+          element("p", `测试时间：${new Date().toLocaleTimeString()}`, "muted"),
+          technicalDetails(result),
+        );
+      } catch (err) {
+        box.replaceChildren(
+          element("h3", `${name} 连接失败`),
+          element("p", err.message, "error-text"),
+          element(
+            "p",
+            "请核对已保存的地址、凭据与服务可达性，再重试。",
+            "muted",
+          ),
+        );
+        throw err;
+      }
     }),
   );
 function addLocationRow(
@@ -459,7 +738,11 @@ function addLocationRow(
     input.required = true;
     input.maxLength = name === "path" ? 1000 : name === "id" ? 64 : 100;
     wrap.append(input);
-    row.append(wrap);
+    if (name === "id") {
+      const advanced = element("details", undefined, "location-advanced");
+      advanced.append(element("summary", "高级：目录 ID"), wrap);
+      row.append(advanced);
+    } else row.append(wrap);
   }
   const label = element("label", "默认", "check");
   const radio = element("input");
@@ -485,6 +768,7 @@ formAction("#locations-form", async () => {
     method: "PUT",
     body: JSON.stringify({ items }),
   });
+  locationsSnapshot = locationFingerprint();
   notice("目录预设已保存");
 });
 async function loadTokens() {
@@ -494,7 +778,11 @@ async function loadTokens() {
     const row = element("div", undefined, "token-item");
     const info = element("div", item.name);
     info.append(
-      element("p", item.scopes.join(" · "), "muted"),
+      element(
+        "p",
+        item.scopes.map((scope) => scopeNames[scope] || scope).join(" · "),
+        "muted",
+      ),
       element(
         "p",
         `有效至 ${date(item.expires_at)}${item.revoked ? " · 已撤销" : ""}`,
@@ -505,6 +793,12 @@ async function loadTokens() {
     if (!item.revoked)
       row.append(
         button("撤销", async () => {
+          if (
+            !confirm(
+              `撤销“${item.name}”？使用该令牌的自动化将立即失去访问权限。`,
+            )
+          )
+            return;
           await api("/admin/tokens/" + item.id, { method: "DELETE" });
           await loadTokens();
         }),
@@ -521,16 +815,34 @@ formAction("#token-form", async (form) => {
       expires_in_days: Number(form.days.value),
     }),
   });
+  tokenValue = data.token;
+  $("#token-reveal").hidden = false;
+  $("#copy-feedback").textContent = "";
   $("#new-token").textContent =
     "请立即复制并安全保存；刷新后不再显示：\n" + data.token;
   $("#new-token").hidden = false;
   await loadTokens();
 });
+$("#copy-token").addEventListener("click", () =>
+  busy($("#copy-token"), async () => {
+    try {
+      await navigator.clipboard.writeText(tokenValue);
+      $("#copy-feedback").textContent = " 已复制，请安全保存";
+    } catch {
+      $("#copy-feedback").textContent =
+        " 浏览器不支持自动复制，请手动选择上方令牌复制";
+    }
+  }),
+);
 (async () => {
   try {
     const data = await api("/auth/me");
-    if (data.kind === "session") showApplication();
-    else showLogin();
+    if (data.kind === "session") {
+      showApplication();
+      await loadSetupGuide().catch((err) =>
+        notice("配置状态暂不可用：" + err.message, true),
+      );
+    } else showLogin();
   } catch {
     showLogin();
   }
