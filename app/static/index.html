@@ -2,33 +2,53 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark light" />
     <title>M-Team Downloader</title>
     <script src="/static/theme.js"></script>
+    <link
+      rel="preload"
+      href="/static/fonts/recursive-latin-mono-wght.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <link rel="stylesheet" href="/static/style.css" />
     <script src="/static/app.js" defer></script>
   </head>
   <body>
-    <header>
-      <div>
-        <h1>M-Team Downloader</h1>
-        <p>搜索资源，选择目录，提交到你的 qBittorrent。</p>
+    <header class="topbar">
+      <div class="brand">
+        <span class="signal" aria-hidden="true"
+          ><i></i><i></i><i></i><i></i><i></i
+        ></span>
+        <div>
+          <h1>M-Team Downloader</h1>
+          <p>搜索资源，选择目录，提交到你的 qBittorrent。</p>
+        </div>
       </div>
       <div class="header-actions">
         <label class="theme-control" for="theme-select"
           >外观
           <select id="theme-select">
-            <option value="system">跟随系统</option>
-            <option value="light">浅色</option>
             <option value="dark">深色</option>
+            <option value="light">浅色</option>
+            <option value="system">跟随系统</option>
           </select>
         </label>
         <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a>
+        <button id="logout" class="quiet" type="button">退出登录</button>
       </div>
     </header>
     <div id="notice" role="status" hidden></div>
     <main>
       <section id="login-panel" class="card" hidden>
+        <span class="signal signal-large" aria-hidden="true"
+          ><i></i><i></i><i></i><i></i><i></i
+        ></span>
         <h2>登录控制台</h2>
         <p class="muted">
           使用部署时设置的管理员密码。AI 请使用独立 API 令牌。
@@ -44,12 +64,32 @@
         </form>
       </section>
       <div id="application" hidden>
-        <nav>
-          <button data-tab="search" class="active">资源搜索</button
-          ><button data-tab="jobs">提交记录</button
-          ><button data-tab="settings">连接与目录</button
-          ><button data-tab="tokens">API 令牌</button
-          ><button id="logout" class="quiet">退出登录</button>
+        <nav class="tabbar" aria-label="主导航">
+          <button data-tab="search" class="active" aria-current="page">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6" />
+              <path d="m15 15 5 5" />
+            </svg>
+            <span>资源搜索</span></button
+          ><button data-tab="jobs">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 4v11m-5-5 5 5 5-5M5 20h14" />
+            </svg>
+            <span>提交记录</span></button
+          ><button data-tab="settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h10m4 0h2M4 17h4m4 0h8" />
+              <circle cx="16" cy="7" r="2" />
+              <circle cx="10" cy="17" r="2" />
+            </svg>
+            <span>连接与目录</span></button
+          ><button data-tab="tokens">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="8" cy="12" r="4" />
+              <path d="M12 12h8m-3 0v3m-3-3v2" />
+            </svg>
+            <span>API 令牌</span>
+          </button>
         </nav>
         <section
           id="setup-guide"
@@ -59,48 +99,57 @@
         >
           <div class="section-title">
             <h2 id="setup-title">先连接服务，开始第一次搜索</h2>
-            <button id="setup-open" class="secondary" type="button">
-              前往连接设置
-            </button>
+            <button id="setup-open" type="button">前往连接设置</button>
           </div>
           <p class="muted">
             保存连接信息后分别测试连接，再确认 qBittorrent 内的保存目录。
           </p>
           <ol id="setup-steps"></ol>
         </section>
-        <section id="search-panel" class="card tab-panel">
+        <section id="search-panel" class="tab-panel search-panel">
           <form id="search-form" class="search-bar">
-            <input
-              name="keyword"
-              placeholder="资源名称 / IMDb ID"
-              maxlength="200"
-              required
-              aria-label="搜索关键词"
-            /><select name="mode" aria-label="搜索范围">
+            <div class="search-field">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6" />
+                <path d="m15 15 5 5" />
+              </svg>
+              <input
+                name="keyword"
+                placeholder="资源名称 / IMDb ID"
+                maxlength="200"
+                required
+                aria-label="搜索关键词"
+                aria-keyshortcuts="/ Control+K Meta+K"
+                autocomplete="off"
+              /><kbd title="按 / 或 Ctrl+K 聚焦搜索">/</kbd>
+            </div>
+            <select name="mode" aria-label="搜索范围">
               <option value="normal">综合</option>
               <option value="adult">成人</option></select
-            ><label class="check"
+            ><label class="check free-toggle"
               ><input type="checkbox" name="free_only" />站点免费筛选</label
             ><button type="submit">搜索</button>
           </form>
-          <p class="muted">
+          <p class="muted search-hint">
             综合与成人分区分别检索。站点优惠可能变化，提交前请核对。
           </p>
           <p id="search-feedback" class="muted" role="status" hidden></p>
           <div class="table-wrap">
-            <table>
+            <table class="results-table">
               <thead>
                 <tr>
                   <th>资源</th>
-                  <th>大小</th>
+                  <th class="num">大小</th>
                   <th>做种 / 下载</th>
                   <th>优惠</th>
-                  <th>操作</th>
+                  <th><span class="visually-hidden">操作</span></th>
                 </tr>
               </thead>
               <tbody id="results">
                 <tr>
-                  <td colspan="5" class="muted">输入关键词开始搜索</td>
+                  <td colspan="5" class="muted empty-state">
+                    输入关键词开始搜索
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -163,14 +212,14 @@
               </div>
               <p id="jobs-scope" class="muted">正在加载记录…</p>
               <div class="table-wrap">
-                <table>
+                <table class="jobs-table">
                   <thead>
                     <tr>
                       <th>资源 / 时间</th>
                       <th>保存目录</th>
                       <th>提交状态</th>
                       <th>下载进度</th>
-                      <th>操作</th>
+                      <th><span class="visually-hidden">操作</span></th>
                     </tr>
                   </thead>
                   <tbody id="jobs"></tbody>
@@ -235,44 +284,47 @@
               密钥与密码加密保存，不会回显。留空保留已有值。更换前请等待排队任务处理完。
             </p>
             <form id="settings-form" class="grid-form">
-              <label
-                >M-Team 网页地址<input name="site_url" type="url" required
-              /></label>
-              <label
-                >M-Team API 地址<input name="site_api_url" type="url" required
-              /></label>
-              <label
-                >M-Team API Key<input
-                  name="site_api_key"
-                  type="password"
-                  autocomplete="new-password"
-              /></label>
-              <label
-                >qBittorrent WebUI 地址<input
-                  name="qb_url"
-                  type="url"
-                  placeholder="http://192.168.1.10:8080"
-                  required
-              /></label>
-              <label
-                >qBittorrent 用户名<input
-                  name="qb_username"
-                  autocomplete="off"
-                  required
-              /></label>
-              <label
-                >qBittorrent 密码<input
-                  name="qb_password"
-                  type="password"
-                  autocomplete="new-password"
-              /></label>
-              <label
-                >下载标签<input name="download_tag" maxlength="100"
-              /></label>
-              <label class="check"
-                ><input name="qb_verify_tls" type="checkbox" />验证 qBittorrent
-                HTTPS 证书（推荐）</label
-              >
+              <fieldset class="form-group">
+                <legend>M-Team</legend>
+                <label
+                  >网页地址<input name="site_url" type="url" required
+                /></label>
+                <label
+                  >API 地址<input name="site_api_url" type="url" required
+                /></label>
+                <label
+                  >API Key<input
+                    name="site_api_key"
+                    type="password"
+                    autocomplete="new-password"
+                /></label>
+              </fieldset>
+              <fieldset class="form-group">
+                <legend>qBittorrent</legend>
+                <label
+                  >WebUI 地址<input
+                    name="qb_url"
+                    type="url"
+                    placeholder="http://192.168.1.10:8080"
+                    required
+                /></label>
+                <label
+                  >用户名<input name="qb_username" autocomplete="off" required
+                /></label>
+                <label
+                  >密码<input
+                    name="qb_password"
+                    type="password"
+                    autocomplete="new-password"
+                /></label>
+                <label
+                  >下载标签<input name="download_tag" maxlength="100"
+                /></label>
+                <label class="check"
+                  ><input name="qb_verify_tls" type="checkbox" />验证
+                  qBittorrent HTTPS 证书（推荐）</label
+                >
+              </fieldset>
               <div class="actions full">
                 <button type="submit">保存连接设置</button
                 ><button type="button" id="test-mteam" class="secondary">
@@ -316,7 +368,7 @@
                 placeholder="例如：我的 AI 助手"
                 maxlength="100"
                 required /></label
-            ><label
+            ><label class="token-days"
               >有效天数<input
                 name="days"
                 type="number"
@@ -325,7 +377,8 @@
                 max="365"
                 required
             /></label>
-            <div class="scopes">
+            <fieldset class="scopes">
+              <legend>权限</legend>
               <label class="check"
                 ><input
                   type="checkbox"
@@ -353,7 +406,7 @@
                   value="downloads:delete"
                 />删除提交记录（不删除文件）</label
               >
-            </div>
+            </fieldset>
             <button type="submit">创建令牌</button>
           </form>
           <div id="token-reveal" hidden>
@@ -367,9 +420,9 @@
       </div>
     </main>
     <dialog id="job-mobile-dialog" aria-labelledby="job-drawer-title"></dialog>
-    <dialog id="download-dialog">
+    <dialog id="download-dialog" aria-labelledby="download-heading">
       <form id="download-form">
-        <h2>添加下载</h2>
+        <h2 id="download-heading">添加下载</h2>
         <p id="download-title"></p>
         <p id="download-summary" class="muted"></p>
         <label>保存目录<select name="location_id" required></select></label

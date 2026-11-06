@@ -3,9 +3,10 @@
   "use strict";
   const storageKey = "mtd-theme";
   const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+  // Dark is the default; "system" is an explicit opt-in.
   const normalize = (value) =>
-    ["light", "dark"].includes(value) ? value : "system";
-  let preference = "system";
+    ["light", "dark", "system"].includes(value) ? value : "dark";
+  let preference = "dark";
   try {
     preference = normalize(localStorage.getItem(storageKey));
   } catch {

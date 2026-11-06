@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 
 export async function checkThemePreference(page) {
   const theme = () => page.locator("html").getAttribute("data-theme");
-  await page.emulateMedia({ colorScheme: "dark" });
+  // Without a stored choice the app starts dark, even on a light system.
+  await page.emulateMedia({ colorScheme: "light" });
   await page.waitForFunction(
     () => document.documentElement.dataset.theme === "dark",
   );
-  assert.equal(await page.locator("#theme-select").inputValue(), "system");
+  assert.equal(await page.locator("#theme-select").inputValue(), "dark");
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.locator("#theme-select").selectOption("light");
   assert.equal(await theme(), "light");
   await page.reload();

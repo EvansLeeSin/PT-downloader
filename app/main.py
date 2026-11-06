@@ -105,7 +105,12 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Cache-Control"] = "no-store"
+        # Fonts never change under the same name (rename the file to update one),
+        # so they may be cached for a year; everything else stays uncached.
+        font = request.url.path.startswith("/static/fonts/") and response.status_code == 200
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if font else "no-store"
+        )
         if request.url.path != "/docs":
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"

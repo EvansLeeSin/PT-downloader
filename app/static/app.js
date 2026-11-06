@@ -72,8 +72,16 @@ async function loadSetupGuide() {
   );
   $("#setup-guide").hidden = site && qb;
   $("#setup-steps").replaceChildren(
-    element("li", `${site ? "已保存" : "待配置"} · M-Team API 地址与密钥`),
-    element("li", `${qb ? "已保存" : "待配置"} · qBittorrent WebUI 连接`),
+    element(
+      "li",
+      `${site ? "已保存" : "待配置"} · M-Team API 地址与密钥`,
+      site ? "done" : "",
+    ),
+    element(
+      "li",
+      `${qb ? "已保存" : "待配置"} · qBittorrent WebUI 连接`,
+      qb ? "done" : "",
+    ),
     element("li", "确认保存目录 · 使用下载器容器内路径"),
   );
 }
@@ -179,6 +187,67 @@ function size(bytes) {
 function date(seconds) {
   return new Date(seconds * 1000).toLocaleString();
 }
+// Seeders on a log-like scale: 0 → no signal, 200+ → full bars.
+function swarm(item) {
+  const seeders = Number(item.seeders) || 0;
+  const level = [1, 3, 10, 50, 200].filter((min) => seeders >= min).length;
+  const box = element("div", undefined, "swarm");
+  box.dataset.health = level === 0 ? "none" : level < 3 ? "low" : "good";
+  box.title = `做种 ${item.seeders} · 下载 ${item.leechers}`;
+  const bars = element("span", undefined, "signal");
+  bars.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 5; i++)
+    bars.append(element("i", undefined, i < level ? "on" : ""));
+  const counts = element("span", undefined, "num");
+  counts.append(
+    element("strong", String(item.seeders)),
+    element("span", ` / ${item.leechers}`, "muted"),
+  );
+  box.append(bars, counts);
+  if (seeders === 0) box.append(element("span", " · 暂无做种", "swarm-empty"));
+  return box;
+}
+function remaining(value) {
+  const ms = new Date(value).getTime() - Date.now();
+  if (!Number.isFinite(ms)) return null;
+  if (ms <= 0) return "优惠已到期";
+  const hours = ms / 3_600_000;
+  if (hours < 1) return `剩 ${Math.max(1, Math.round(ms / 60_000))} 分钟`;
+  if (hours < 48) return `剩 ${Math.round(hours)} 小时`;
+  return `剩 ${Math.round(hours / 24)} 天`;
+}
+function promoCell(promo) {
+  const cell = element("td", undefined, "promo-cell");
+  const kind = ["free", "discount", "normal"].includes(promo.type)
+    ? promo.type
+    : "unknown";
+  const text =
+    kind === "free"
+      ? "免费"
+      : kind === "discount"
+        ? `${promo.download_factor * 100}% 计费`
+        : kind === "normal"
+          ? "普通"
+          : "待核对";
+  const chips = element("div", undefined, "promo-chips");
+  chips.append(element("span", text, `badge promo promo-${kind}`));
+  if (Number.isFinite(promo.upload_factor) && promo.upload_factor > 1)
+    chips.append(
+      element("span", `${promo.upload_factor}x 上传`, "badge promo promo-up"),
+    );
+  cell.append(chips);
+  if (promo.expires_at) {
+    const until = "截至 " + new Date(promo.expires_at).toLocaleString();
+    const left = element(
+      "p",
+      remaining(promo.expires_at) || until,
+      "muted promo-expiry",
+    );
+    left.title = until;
+    cell.append(left);
+  }
+  return cell;
+}
 async function tab(name) {
   if (
     !$("#settings-panel").hidden &&
@@ -200,11 +269,12 @@ async function tab(name) {
   document.querySelectorAll(".tab-panel").forEach((node) => {
     node.hidden = node.id !== name + "-panel";
   });
-  document
-    .querySelectorAll("[data-tab]")
-    .forEach((node) =>
-      node.classList.toggle("active", node.dataset.tab === name),
-    );
+  document.querySelectorAll("[data-tab]").forEach((node) => {
+    const active = node.dataset.tab === name;
+    node.classList.toggle("active", active);
+    if (active) node.setAttribute("aria-current", "page");
+    else node.removeAttribute("aria-current");
+  });
   if (name === "settings") await loadSettings();
   if (name === "jobs") await loadJobs();
   if (name === "tokens") await loadTokens();
@@ -274,7 +344,8 @@ async function search(targetPage = page, criteria = searchState) {
     for (const item of result.items) {
       const row = element("tr");
       const title = element("td");
-      const link = element("a", item.title);
+      title.className = "resource-cell";
+      const link = element("a", item.title, "resource-title");
       link.href = item.detail_url;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
@@ -288,39 +359,23 @@ async function search(targetPage = page, criteria = searchState) {
         description.title = item.description;
         title.append(description);
       }
-      if (item.labels.length)
-        title.append(element("p", item.labels.join(" · "), "muted"));
-      const promo = item.promotion;
-      const promoCell = element("td");
-      const text =
-        promo.type === "free"
-          ? "免费"
-          : promo.type === "discount"
-            ? `${promo.download_factor * 100}% 计费`
-            : promo.type === "normal"
-              ? "普通"
-              : "待核对";
-      promoCell.append(
-        element("span", text, "badge " + (promo.type === "free" ? "free" : "")),
-      );
-      if (promo.expires_at)
-        promoCell.append(
-          element(
-            "p",
-            "截至 " + new Date(promo.expires_at).toLocaleString(),
-            "muted",
-          ),
-        );
-      const action = element("td");
-      action.append(button("下载", () => openDownload(item), "primary"));
+      if (item.labels.length) {
+        const tags = element("p", undefined, "tags");
+        for (const label of item.labels)
+          tags.append(element("span", label, "tag"));
+        title.append(tags);
+      }
+      const action = element("td", undefined, "row-action");
+      const get = button("下载", () => openDownload(item), "primary");
+      get.setAttribute("aria-label", `下载 ${item.title}`);
+      action.append(get);
+      const seeds = element("td");
+      seeds.append(swarm(item));
       row.append(
         title,
-        element("td", size(item.size_bytes)),
-        element(
-          "td",
-          `${item.seeders} / ${item.leechers}${item.seeders === 0 ? " · 暂无做种" : ""}`,
-        ),
-        promoCell,
+        element("td", size(item.size_bytes), "num size-cell"),
+        seeds,
+        promoCell(item.promotion),
         action,
       );
       $("#results").append(row);
@@ -444,6 +499,7 @@ function loadJobs() {
 function downloadProgress(job) {
   const cell = element("td", undefined, "download-progress");
   const live = job.download_status;
+  cell.dataset.phase = progressPhase(live);
   if (!live) {
     cell.append(element("span", job.live_error ? "进度暂不可用" : "—"));
     if (job.live_error)
@@ -472,10 +528,14 @@ function downloadProgress(job) {
     error: "下载器错误",
     missingFiles: "文件缺失",
   };
-  cell.append(element("span", states[live.state] || live.state || "状态未知"));
+  cell.append(
+    element("span", states[live.state] || live.state || "状态未知", "phase"),
+  );
   if (Number.isFinite(live.progress)) {
     const fraction = Math.max(0, Math.min(1, live.progress));
-    cell.append(element("span", ` · ${(fraction * 100).toFixed(1)}%`));
+    cell.append(
+      element("span", ` · ${(fraction * 100).toFixed(1)}%`, "num percent"),
+    );
     const bar = element("progress");
     bar.max = 1;
     bar.value = fraction;
@@ -486,8 +546,28 @@ function downloadProgress(job) {
   if (Number.isFinite(live.dlspeed)) summary.push(size(live.dlspeed) + "/s");
   if (Number.isFinite(live.amount_left))
     summary.push("剩余 " + size(live.amount_left));
-  if (summary.length) cell.append(element("p", summary.join(" · "), "muted"));
+  if (summary.length)
+    cell.append(element("p", summary.join(" · "), "muted num"));
   return cell;
+}
+// Colour and motion of the progress bar follow the downloader state.
+function progressPhase(live) {
+  if (!live) return "none";
+  const state = String(live.state || "");
+  if (["error", "missingFiles"].includes(state)) return "error";
+  if (/^(paused|stopped)/.test(state)) return "paused";
+  if (/UP$/.test(state) || live.progress >= 1) return "seed";
+  if (
+    [
+      "stalledDL",
+      "queuedDL",
+      "checkingDL",
+      "checkingResumeData",
+      "moving",
+    ].includes(state)
+  )
+    return "wait";
+  return "down";
 }
 const JOB_BATCH_SIZE = 100;
 const JOB_PAGE_SIZE = 10;
@@ -656,13 +736,13 @@ function renderJobs() {
       "job-name",
     );
     name.title = name.textContent;
-    title.append(name, element("p", date(job.created_at), "muted"));
+    title.append(name, element("p", date(job.created_at), "muted num"));
     if (job.id === highlightedJobId)
       title.append(element("p", "本次提交", "current-job"));
     const path = element(
       "td",
       currentSavePath(job) || job.save_path,
-      "job-path",
+      "job-path num",
     );
     if (currentSavePath(job) && currentSavePath(job) !== job.save_path)
       path.append(element("p", "请求：" + job.save_path, "unsaved"));
@@ -876,6 +956,7 @@ function renderJobDetail(job) {
     box.append(element("h3", "实际下载状态"));
     const progress = downloadProgress(job);
     const wrap = element("div", undefined, "drawer-progress");
+    wrap.dataset.phase = progress.dataset.phase;
     wrap.append(...progress.childNodes);
     box.append(wrap);
   }
@@ -947,6 +1028,32 @@ function renderServiceStatus() {
   }
 }
 renderServiceStatus();
+// "/" or Ctrl/⌘+K jumps to the search field from anywhere in the console.
+document.addEventListener("keydown", (event) => {
+  const combo =
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    event.key.toLowerCase() === "k";
+  const typing = event.target.closest?.(
+    "input, select, textarea, [contenteditable]",
+  );
+  const slash =
+    event.key === "/" &&
+    !typing &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey;
+  if (!combo && !slash) return;
+  if ($("#application").hidden || document.querySelector("dialog[open]"))
+    return;
+  event.preventDefault();
+  const ready = $("#search-panel").hidden ? tab("search") : Promise.resolve();
+  ready
+    .then(() => {
+      if (!$("#search-panel").hidden) $("#search-form").keyword.select();
+    })
+    .catch((err) => notice(err.message, true));
+});
 $("#refresh-jobs").addEventListener("click", () =>
   busy($("#refresh-jobs"), loadJobs),
 );

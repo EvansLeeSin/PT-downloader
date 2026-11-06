@@ -22,7 +22,15 @@ def api_token(client, scopes):
 def test_health_static_and_openapi(client):
     assert client.get("/healthz").json() == {"status": "ok"}
     assert client.get("/").status_code == 200
-    assert client.get("/static/app.js").status_code == 200
+    script = client.get("/static/app.js")
+    assert script.status_code == 200
+    assert script.headers["cache-control"] == "no-store"
+    font = client.get("/static/fonts/recursive-latin-mono-wght.woff2")
+    assert font.status_code == 200
+    assert font.headers["cache-control"] == "public, max-age=31536000, immutable"
+    missing = client.get("/static/fonts/missing.woff2")
+    assert missing.status_code == 404
+    assert missing.headers["cache-control"] == "no-store"
     schema = client.get("/openapi.json").json()
     search_parameters = schema["paths"]["/api/v1/torrents/search"]["get"]["parameters"]
     mode = next(value for value in search_parameters if value["name"] == "mode")
