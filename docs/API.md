@@ -27,7 +27,7 @@ Authorization: Bearer mtd_...
 GET /torrents/search?keyword=流浪地球&mode=normal&page=1&page_size=20&free_only=false
 ```
 
-- `keyword`：必填，1–200 字符，支持标题、关键词或 `tt...` IMDb ID。
+- `keyword`：必填，1–200 字符，支持标题、关键词或 `tt...` IMDb ID。也可按站内资源 ID 直接查找：`mteam:123456`、`#123456` 或详情页链接 `https://站点/detail/123456`，此时返回仅含该资源的一条结果，忽略 `mode`、`categories`、`free_only`，`page` 大于 1 时为空列表；ID 不存在或无权查看时返回 404 `TORRENT_LOOKUP_FAILED`。纯数字（如 `1917`）仍按标题关键词搜索。
 - `mode`：`normal`（综合，默认）或 `adult`（成人），直接传给 M-Team 搜索接口。两区分别检索，综合不等于包含成人区的“全站”；切换分区时建议将 `page` 重置为 1。缓存按分区隔离。
 - `page`：从 1 开始，最多 10000。
 - `page_size`：1–100，默认 20。
@@ -239,7 +239,7 @@ HTTP 错误和任务内部错误是两层：请求入队失败返回 HTTP 错误
 
 常见业务错误码：
 
-`SITE_AUTH_FAILED`, `SITE_API_ERROR`, `SITE_RATE_LIMITED`, `SITE_UNREACHABLE`, `INVALID_TORRENT`, `UNTRUSTED_DOWNLOAD_URL`, `DOWNLOADER_AUTH_FAILED`, `DOWNLOADER_UNREACHABLE`, `DOWNLOADER_QUERY_FAILED`, `SUBMISSION_UNCONFIRMED`, `PROCESS_RESTARTED`, `IDEMPOTENCY_CONFLICT`, `QUEUE_FULL`, `JOB_ACTIVE`, `JOB_DELETED`, `JOB_NOT_FOUND`。
+`SITE_AUTH_FAILED`, `SITE_API_ERROR`, `TORRENT_LOOKUP_FAILED`, `SITE_RATE_LIMITED`, `SITE_UNREACHABLE`, `INVALID_TORRENT`, `UNTRUSTED_DOWNLOAD_URL`, `DOWNLOADER_AUTH_FAILED`, `DOWNLOADER_UNREACHABLE`, `DOWNLOADER_QUERY_FAILED`, `SUBMISSION_UNCONFIRMED`, `PROCESS_RESTARTED`, `IDEMPOTENCY_CONFLICT`, `QUEUE_FULL`, `JOB_ACTIVE`, `JOB_DELETED`, `JOB_NOT_FOUND`。
 
 ## 建议的 AI 工具划分
 

@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 
-from app.clients.mteam import MTeamClient
+from app.clients.mteam import MTeamClient, parse_resource_id
 from app.clients.qbittorrent import QbClient
 from app.errors import AppError
 from app.models import SearchMode, SearchResult
@@ -22,6 +22,10 @@ class SearchService:
 
     def search(self, keyword, page, page_size, categories, free_only, mode: SearchMode = "normal"):
         config = self.store.settings()
+        torrent_id = parse_resource_id(keyword)
+        if torrent_id:
+            # Explicit ID lookup: filters/mode do not apply, so normalize the cache key.
+            keyword, categories, free_only, mode = "id:" + torrent_id, [], False, "normal"
         key = (
             token_digest(config.model_dump_json()),
             keyword,
@@ -39,9 +43,11 @@ class SearchService:
             if now - self.last_call < 1:
                 raise AppError("SEARCH_RATE_LIMITED", "搜索过于频繁，请至少间隔 1 秒", 429)
             self.last_call = now
-            result = MTeamClient(config).search(
-                keyword, page, page_size, categories, free_only, mode
-            )
+            client = MTeamClient(config)
+            if torrent_id:
+                result = client.lookup(torrent_id, page, page_size)
+            else:
+                result = client.search(keyword, page, page_size, categories, free_only, mode)
             if len(self.cache) >= 100:
                 self.cache.pop(next(iter(self.cache)))
             self.cache[key] = (time.monotonic(), result)

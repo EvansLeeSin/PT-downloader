@@ -279,6 +279,38 @@ def test_search_mode_reaches_site_and_separates_cache(configured, monkeypatch):
     assert route.call_count == 2
 
 
+@respx.mock
+def test_search_by_resource_id(configured, monkeypatch):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("app.service.time", SimpleNamespace(monotonic=lambda: clock.now))
+    detail = respx.post("https://api.mteam.test/api/torrent/detail").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"id": "123", "name": "按 ID"}})
+    )
+    search = respx.post("https://api.mteam.test/api/torrent/search").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"data": [], "total": 0}})
+    )
+    token = api_token(configured, ["search:read"])
+    headers = {"Authorization": "Bearer " + token["token"]}
+    result = configured.get(
+        "/api/v1/torrents/search",
+        params={"keyword": "#123", "mode": "adult", "free_only": "true"},
+        headers=headers,
+    )
+    assert result.status_code == 200
+    assert [item["id"] for item in result.json()["items"]] == ["mteam:123"]
+    # Same ID in another form hits the cache; a bare number stays a keyword search.
+    for keyword in ("mteam:123", "https://kp.m-team.cc/detail/123"):
+        cached = configured.get(
+            "/api/v1/torrents/search", params={"keyword": keyword}, headers=headers
+        )
+        assert cached.json() == result.json()
+    assert detail.call_count == 1
+    clock.now += 2
+    plain = configured.get("/api/v1/torrents/search", params={"keyword": "123"}, headers=headers)
+    assert plain.status_code == 200
+    assert json.loads(search.calls.last.request.content)["keyword"] == "123"
+
+
 @pytest.mark.parametrize("mode", ["all", "ADULT", "", "unknown"])
 def test_search_rejects_invalid_mode(admin, mode):
     result = admin.get("/api/v1/torrents/search", params={"keyword": "资源", "mode": mode})

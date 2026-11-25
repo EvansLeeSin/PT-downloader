@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from app.clients.mteam import MTeamClient, parse_time, promotion
+from app.clients.mteam import MTeamClient, parse_resource_id, parse_time, promotion
 from app.errors import AppError
 from app.models import Settings
 
@@ -286,3 +286,51 @@ def test_http_errors(status, code):
     with pytest.raises(AppError) as error:
         client().search("movie", 1, 20, [], False)
     assert error.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("keyword", "expected"),
+    [
+        ("mteam:123456", "123456"),
+        ("MTEAM:123456", "123456"),
+        ("#123456", "123456"),
+        (" # 42 ", "42"),
+        ("https://kp.m-team.cc/detail/123456", "123456"),
+        ("https://next.m-team.cc/detail/987/", "987"),
+        ("http://mteam.test:8443/detail/5?from=list#top", "5"),
+        ("123456", None),
+        ("1917", None),
+        ("#0", None),
+        ("#12a", None),
+        ("mteam:", None),
+        ("https://mteam.test/browse/123", None),
+        ("https:///detail/123", None),
+        ("ftp://mteam.test/detail/123", None),
+        ("流浪地球 #2", None),
+        ("tt1234567", None),
+    ],
+)
+def test_parse_resource_id(keyword, expected):
+    assert parse_resource_id(keyword) == expected
+
+
+@respx.mock
+def test_lookup_by_id():
+    route = respx.post(BASE + "/api/torrent/detail").mock(
+        return_value=httpx.Response(200, json={"code": "0", "data": row()})
+    )
+    result = client().lookup("123", 1, 20)
+    assert [item.id for item in result.items] == ["mteam:123"]
+    assert (result.total, result.has_more) == (1, False)
+    assert route.calls.last.request.content == b"id=123"
+    assert client().lookup("123", 2, 20).items == []
+
+
+@respx.mock
+def test_lookup_missing_id():
+    respx.post(BASE + "/api/torrent/detail").mock(
+        return_value=httpx.Response(200, json={"code": "1", "message": "not found", "data": None})
+    )
+    with pytest.raises(AppError) as error:
+        client().lookup("999", 1, 20)
+    assert (error.value.code, error.value.status) == ("TORRENT_LOOKUP_FAILED", 404)

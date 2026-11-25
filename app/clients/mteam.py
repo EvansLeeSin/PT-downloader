@@ -79,6 +79,30 @@ def number(value, default=0):
         return default
 
 
+RESOURCE_ID = r"[1-9][0-9]{0,19}"
+
+
+def parse_resource_id(keyword: str) -> str | None:
+    """Recognize an explicit M-Team resource ID in a search box.
+
+    Accepts ``mteam:123456``, ``#123456`` or a detail URL ``https://<site>/detail/123456``.
+    A bare number stays a keyword: titles such as "1917" or "2012" are numbers too.
+    """
+    value = keyword.strip()
+    match = re.fullmatch(r"(?:mteam:|#)\s*(" + RESOURCE_ID + ")", value, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    if re.match(r"https?://", value, re.IGNORECASE):
+        try:
+            parts = urlsplit(value)
+        except ValueError:
+            return None
+        match = re.fullmatch(r"/detail/(" + RESOURCE_ID + ")/?", parts.path)
+        if parts.hostname and match:
+            return match.group(1)
+    return None
+
+
 class MTeamClient:
     def __init__(self, settings: Settings):
         self.config = settings
@@ -185,6 +209,26 @@ class MTeamClient:
         )
         return SearchResult(
             items=items, page=page, page_size=page_size, has_more=has_more, total=total
+        )
+
+    def lookup(self, torrent_id: str, page: int, page_size: int) -> SearchResult:
+        """Search-shaped result for an explicit resource ID (filters do not apply)."""
+        try:
+            item = self.detail("mteam:" + torrent_id)
+        except AppError as exc:
+            if exc.code not in ("SITE_API_ERROR", "SITE_INVALID_RESPONSE"):
+                raise
+            raise AppError(
+                "TORRENT_LOOKUP_FAILED",
+                f"未找到资源 ID {torrent_id}：可能不存在、已删除、无权限查看，或 API Key 无效",
+                404,
+            ) from exc
+        return SearchResult(
+            items=[item] if page == 1 else [],
+            page=page,
+            page_size=page_size,
+            has_more=False,
+            total=1,
         )
 
     def detail(self, resource_id: str):
