@@ -82,6 +82,7 @@ class SmokeQb:
             "dlspeed": 1048576,
             "size": 1073741824,
             "amount_left": 536870912,
+            "eta": 512,
         }
         return "Ok."
 

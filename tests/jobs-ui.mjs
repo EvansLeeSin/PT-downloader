@@ -9,6 +9,7 @@ export async function checkJobsWorkspace(page, base) {
     progress: 0.5,
     dlspeed: 1048576,
     amount_left: 536870912,
+    eta: 512,
     save_path: "/downloads",
   };
   const make = (id, patch = {}) => ({

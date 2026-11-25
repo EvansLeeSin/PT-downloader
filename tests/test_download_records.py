@@ -137,6 +137,7 @@ def test_list_queries_progress_in_one_batch_and_updates_on_refresh(configured, m
         "dlspeed": 1048576,
         "size": 1000,
         "amount_left": 750,
+        "eta": 90,
         "magnet_uri": "secret-must-not-leak",
         "tracker": "private-passkey",
     }
@@ -156,6 +157,8 @@ def test_list_queries_progress_in_one_batch_and_updates_on_refresh(configured, m
     items = {item["id"]: item for item in response.json()["items"]}
     assert items[first["id"]]["download_status"]["progress"] == 0.25
     assert items[second["id"]]["download_status"]["progress"] == 1.0
+    assert items[first["id"]]["download_status"]["eta"] == 90
+    assert items[second["id"]]["download_status"]["eta"] is None
     assert items[missing["id"]]["live_error"]["code"] == "TORRENT_NOT_FOUND"
     assert items[old["id"]]["live_error"]["code"] == "DOWNLOADER_CHANGED"
     for job in (queued, failed):
@@ -225,3 +228,27 @@ def test_manual_detail_recheck_never_resubmits_uncertain_job(configured, monkeyp
     qb.find.assert_called_once_with({"a" * 40})
     qb.add.assert_not_called()
     qb.close.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("torrent", "expected"),
+    [
+        ({"state": "downloading", "progress": 0.5, "eta": 120}, 120),
+        ({"state": "forcedDL", "progress": 0.5, "eta": 59.9}, 59),
+        ({"state": "stalledDL", "progress": 0.5, "eta": 8640000}, None),
+        ({"state": "downloading", "progress": 0.5, "eta": -1}, None),
+        ({"state": "downloading", "progress": 0.5, "eta": "120"}, None),
+        ({"state": "downloading", "progress": 0.5, "eta": True}, None),
+        ({"state": "downloading", "progress": 0.5}, None),
+        ({"state": "pausedDL", "progress": 0.5, "eta": 120}, None),
+        ({"state": "stoppedDL", "progress": 0.5, "eta": 120}, None),
+        ({"state": "checkingDL", "progress": 0.5, "eta": 120}, None),
+        ({"state": "uploading", "progress": 1.0, "eta": 0}, None),
+        ({"state": "downloading", "progress": 1.0, "eta": 5}, None),
+        ({"state": "error", "progress": 0.5, "eta": 120}, None),
+    ],
+)
+def test_download_eta(torrent, expected):
+    from app.service import public_download_status
+
+    assert public_download_status(torrent)["eta"] == expected

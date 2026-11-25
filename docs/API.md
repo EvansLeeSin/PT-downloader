@@ -152,6 +152,7 @@ GET /downloads/f8b91e3b0e194ef6a4468e5b21798dea
     "upspeed": 0,
     "size": 26843545600,
     "amount_left": 20132659200,
+    "eta": 1920,
     "save_path": "/downloads"
   },
   "live_error": null
@@ -191,7 +192,7 @@ GET /downloads?limit=20&offset=0
 - `include_live=true`：为已添加、已存在或待确认且已保存 hash 的记录附加 `download_status` / `live_error`，字段与详情接口相同。每页复用一次下载器连接并批量查询 hash，不逐条登录查询；不包含下载器全部任务。
 - 下载器离线、任务不存在或已切换下载器时，保留提交记录并返回 `live_error`，不会将进度伪装成 0%，也不会重新添加任务。
 - 列表查询不修改待确认记录；如需核对并补全确认信息，使用单条详情接口。
-- 网页在记录页打开时约每 5 秒刷新，慢请求不会叠加。`progress` 为 0–1（例如 `0.5` 为 50%），可结合 `state`、`dlspeed` 和 `amount_left` 展示进度、速度与剩余大小。
+- 网页在记录页打开时约每 5 秒刷新，慢请求不会叠加。`progress` 为 0–1（例如 `0.5` 为 50%），可结合 `state`、`dlspeed` 和 `amount_left` 展示进度、速度与剩余大小。`eta` 为 qBittorrent 估算的剩余下载秒数，仅在下载中且可估算时返回；暂停、做种、校验、出错、已完成或无法估算（qB 的 8640000）时为 `null`。预计完成时间 = 查询时刻 + `eta`。
 
 ```http
 GET /downloads?limit=50&offset=0&include_live=true

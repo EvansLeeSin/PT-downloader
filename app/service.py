@@ -152,8 +152,38 @@ class DownloadWorker:
         )
 
 
+# qBittorrent reports 8640000 (100 days) when the ETA is unknown/infinite.
+QB_ETA_INFINITE = 8640000
+
+
+def download_eta(torrent: dict) -> int | None:
+    """Remaining seconds while actively downloading; None when unknown or not applicable."""
+    eta = torrent.get("eta")
+    if isinstance(eta, bool) or not isinstance(eta, (int, float)):
+        return None
+    if not 0 <= eta < QB_ETA_INFINITE:
+        return None
+    progress = torrent.get("progress")
+    if isinstance(progress, (int, float)) and progress >= 1:
+        return None
+    state = str(torrent.get("state") or "")
+    # Paused, seeding, checking or errored torrents have no meaningful completion time.
+    if (
+        state.endswith("UP")
+        or state.startswith(("paused", "stopped", "checking"))
+        or state
+        in (
+            "error",
+            "missingFiles",
+            "moving",
+        )
+    ):
+        return None
+    return int(eta)
+
+
 def public_download_status(torrent: dict) -> dict:
-    return {
+    result = {
         key: torrent.get(key)
         for key in (
             "name",
@@ -166,6 +196,8 @@ def public_download_status(torrent: dict) -> dict:
             "save_path",
         )
     }
+    result["eta"] = download_eta(torrent)
+    return result
 
 
 def public_job(job: dict) -> dict:

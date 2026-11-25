@@ -569,7 +569,38 @@ function downloadProgress(job) {
     summary.push("剩余 " + size(live.amount_left));
   if (summary.length)
     cell.append(element("p", summary.join(" · "), "muted num"));
+  const finish = completionEstimate(live.eta);
+  if (finish) cell.append(element("p", finish, "muted num eta"));
   return cell;
+}
+// qBittorrent ETA (seconds) → "预计 1 小时 5 分 · 今天 14:32 完成".
+function duration(seconds) {
+  if (seconds < 60) return "不到 1 分钟";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days} 天${hours ? ` ${hours} 小时` : ""}`;
+  if (hours) return `${hours} 小时${minutes ? ` ${minutes} 分` : ""}`;
+  return `${minutes} 分钟`;
+}
+function completionEstimate(eta) {
+  if (!Number.isFinite(eta) || eta < 0) return "";
+  const done = new Date(Date.now() + eta * 1000);
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const time = done.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const day =
+    done.toDateString() === today.toDateString()
+      ? "今天"
+      : done.toDateString() === tomorrow.toDateString()
+        ? "明天"
+        : done.toLocaleDateString([], { month: "numeric", day: "numeric" });
+  return `预计 ${duration(eta)} · ${day} ${time} 完成`;
 }
 // Colour and motion of the progress bar follow the downloader state.
 function progressPhase(live) {

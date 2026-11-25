@@ -168,6 +168,10 @@ class LiveStatus(StrictModel):
     upspeed: int | None = None
     size: int | None = None
     amount_left: int | None = None
+    eta: int | None = Field(
+        default=None,
+        description="预计剩余下载秒数；未在下载、已完成或无法估算时为 null",
+    )
     save_path: str | None = None
 
 
