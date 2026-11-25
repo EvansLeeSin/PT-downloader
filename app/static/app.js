@@ -97,17 +97,38 @@ const statusNames = {
   failed: "失败",
   uncertain: "待确认",
 };
-function notice(message, error = false) {
+const NOTICE_MS = { info: 5000, error: 10000 };
+let noticeDelay = 0;
+function hideNotice() {
   clearTimeout(noticeTimer);
-  const box = $("#notice");
-  box.textContent = message;
-  box.classList.toggle("error", error);
-  box.hidden = false;
-  if (!error)
-    noticeTimer = setTimeout(() => {
-      box.hidden = true;
-    }, 7000);
+  $("#notice").hidden = true;
 }
+function scheduleNotice() {
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(hideNotice, noticeDelay);
+}
+function notice(message, error = false) {
+  const box = $("#notice");
+  $("#notice-text").textContent = message;
+  box.classList.toggle("error", error);
+  box.setAttribute("role", error ? "alert" : "status");
+  box.hidden = false;
+  // Errors stay a bit longer so they can be read, but never forever.
+  noticeDelay = error ? NOTICE_MS.error : NOTICE_MS.info;
+  if (!box.matches(":hover, :focus-within")) scheduleNotice();
+  else clearTimeout(noticeTimer);
+}
+// Pause while the user reads/selects the text; resume once they leave.
+$("#notice").addEventListener("mouseenter", () => clearTimeout(noticeTimer));
+$("#notice").addEventListener("mouseleave", () => {
+  if (!$("#notice").hidden) scheduleNotice();
+});
+$("#notice").addEventListener("focusin", () => clearTimeout(noticeTimer));
+$("#notice").addEventListener("focusout", (event) => {
+  if (!$("#notice").contains(event.relatedTarget) && !$("#notice").hidden)
+    scheduleNotice();
+});
+$("#notice-close").addEventListener("click", hideNotice);
 async function api(path, options = {}) {
   const response = await fetch("/api/v1" + path, {
     credentials: "same-origin",
