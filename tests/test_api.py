@@ -5,8 +5,10 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import respx
+from fastapi.testclient import TestClient
 
 from app.errors import AppError
+from app.main import create_app
 from app.models import DownloadCreate
 from tests.conftest import PASSWORD
 
@@ -281,3 +283,38 @@ def test_search_mode_reaches_site_and_separates_cache(configured, monkeypatch):
 def test_search_rejects_invalid_mode(admin, mode):
     result = admin.get("/api/v1/torrents/search", params={"keyword": "资源", "mode": mode})
     assert result.status_code == 422
+
+
+def test_trusted_origins_for_tunnel(tmp_path, monkeypatch):
+    # Cloudflare Tunnel / HTTPS proxy: browser Origin is https, the app only sees http.
+    tunnel = {"origin": "https://pt.example.com", "host": "pt.example.com"}
+    app = create_app(data_dir=tmp_path / "a", admin_password=PASSWORD, start_worker=False)
+    with TestClient(app) as plain:
+        rejected = plain.post("/api/v1/auth/login", json={"password": PASSWORD}, headers=tunnel)
+        assert rejected.status_code == 403
+        assert "APP_TRUSTED_ORIGINS" in rejected.json()["error"]["message"]
+
+    monkeypatch.setenv("APP_TRUSTED_ORIGINS", " https://PT.example.com/ , https://other.test:8443")
+    app = create_app(data_dir=tmp_path / "b", admin_password=PASSWORD, start_worker=False)
+    with TestClient(app) as proxied:
+        result = proxied.post("/api/v1/auth/login", json={"password": PASSWORD}, headers=tunnel)
+        assert result.status_code == 200
+        assert "Secure" in result.headers["set-cookie"]
+        proxied.cookies.set("mtd_session", result.cookies["mtd_session"])
+        assert proxied.put("/api/v1/admin/settings", json={}, headers=tunnel).status_code != 403
+        for bad in (
+            "https://evil.test",
+            "http://pt.example.com",
+            "https://pt.example.com:444",
+            "null",
+        ):
+            response = proxied.put("/api/v1/admin/settings", json={}, headers={"origin": bad})
+            assert response.status_code == 403, bad
+
+
+def test_trusted_origins_invalid(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_TRUSTED_ORIGINS", "pt.example.com")
+    app = create_app(data_dir=tmp_path, admin_password=PASSWORD, start_worker=False)
+    with pytest.raises(RuntimeError, match="APP_TRUSTED_ORIGINS"):
+        with TestClient(app):
+            pass

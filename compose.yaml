@@ -7,6 +7,7 @@ services:
     environment:
       APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?请在 .env 中设置至少 12 位管理员密码}"
       APP_DATA_DIR: /app/data
+      APP_TRUSTED_ORIGINS: "${APP_TRUSTED_ORIGINS:-}"
       TZ: Asia/Shanghai
     volumes:
       - app-data:/app/data

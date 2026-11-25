@@ -19,7 +19,7 @@ Authorization: Bearer mtd_...
 
 检索和下载的完整流程一般需要前三个权限。删除记录独立授权，网页创建令牌时默认不勾选；旧令牌不会自动获得此权限。没有“下载创建”权限的助手无法添加任务。令牌默认 30 天有效，可配置 1–365 天，管理员可以撤销。不要把令牌放在 URL 参数中。
 
-管理员浏览器使用 HttpOnly、SameSite=Strict 会话 Cookie；写请求校验同源 Origin。管理接口不接受 API 令牌。API 调用不依赖 Cookie，也不要求 Origin。无跨域浏览器 CORS 开放；外部 AI 应通过服务端 HTTP 工具调用。
+管理员浏览器使用 HttpOnly、SameSite=Strict 会话 Cookie；写请求校验同源 Origin（经 HTTPS 反向代理或 Cloudflare Tunnel 访问时，将浏览器访问地址配置到 `APP_TRUSTED_ORIGINS`）。管理接口不接受 API 令牌。API 调用不依赖 Cookie，也不要求 Origin。无跨域浏览器 CORS 开放；外部 AI 应通过服务端 HTTP 工具调用。
 
 ## 1. 检索
 

@@ -18,6 +18,7 @@ from app.auth import (
     RateLimiter,
     check_origin,
     matches_password,
+    parse_trusted_origins,
     password_digest,
     principal,
     require_admin,
@@ -59,6 +60,7 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
             raise RuntimeError(
                 "请通过 APP_ADMIN_PASSWORD 或 APP_ADMIN_PASSWORD_FILE 设置至少 12 位管理员密码"
             )
+        trusted_origins = parse_trusted_origins(os.environ.get("APP_TRUSTED_ORIGINS"))
         # httpx INFO logs include full signed torrent URLs. Never emit them.
         logging.getLogger("httpx").setLevel(logging.WARNING)
         directory = Path(data_dir or os.environ.get("APP_DATA_DIR", "data"))
@@ -72,6 +74,7 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
                 ) from exc
             application.state.store = Store(directory)
             application.state.admin_password_digest = password_digest(password)
+            application.state.trusted_origins = trusted_origins
             application.state.limiter = RateLimiter()
             application.state.search = SearchService(application.state.store)
             application.state.worker = DownloadWorker(application.state.store)
@@ -172,7 +175,10 @@ def create_app(data_dir: Path | None = None, admin_password: str | None = None, 
             COOKIE,
             token,
             httponly=True,
-            secure=request.url.scheme == "https",
+            # Behind a TLS-terminating proxy/tunnel the app sees http, but the browser
+            # page (already Origin-checked above) is https: keep the cookie Secure.
+            secure=request.url.scheme == "https"
+            or request.headers.get("origin", "").startswith("https://"),
             samesite="strict",
             max_age=12 * 3600,
             path="/",

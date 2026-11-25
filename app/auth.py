@@ -47,26 +47,63 @@ def matches_password(password: str, digest: bytes) -> bool:
     return secrets.compare_digest(password_digest(password), digest)
 
 
+def _origin_key(value: str) -> tuple[str, str, int]:
+    """Normalize a bare origin (scheme://host[:port]) or raise ValueError."""
+    parts = urlsplit(value)
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.path
+        or parts.query
+        or parts.fragment
+        or parts.username is not None
+        or parts.password is not None
+    ):
+        raise ValueError(value)
+    port = parts.port if parts.port is not None else (443 if parts.scheme == "https" else 80)
+    return parts.scheme, parts.hostname.lower(), port
+
+
+def parse_trusted_origins(raw: str | None) -> frozenset[tuple[str, str, int]]:
+    """Parse APP_TRUSTED_ORIGINS, e.g. 'https://pt.example.com,https://pt2.example.com'."""
+    result = set()
+    for item in (raw or "").replace("\n", ",").split(","):
+        item = item.strip().rstrip("/")
+        if not item:
+            continue
+        try:
+            result.add(_origin_key(item))
+        except ValueError:
+            raise RuntimeError(
+                f"APP_TRUSTED_ORIGINS 格式错误：{item!r}，应为 https://域名[:端口]，多个用逗号分隔"
+            ) from None
+    return frozenset(result)
+
+
 def check_origin(request: Request):
-    origin = request.headers.get("origin")
-    expected = urlsplit(str(request.base_url))
+    """CSRF guard for cookie-authenticated browser writes.
+
+    Accept the Origin when it equals the URL the app sees itself at, or when it is
+    explicitly listed in APP_TRUSTED_ORIGINS (needed behind HTTPS reverse proxies or
+    Cloudflare Tunnel, where the app itself only receives plain HTTP).
+    """
+    origin = request.headers.get("origin") or ""
+    trusted = getattr(request.app.state, "trusted_origins", frozenset())
     try:
-        actual = urlsplit(origin or "")
-        same = (
-            actual.scheme,
-            actual.hostname,
-            actual.port if actual.port is not None else (443 if actual.scheme == "https" else 80),
-        ) == (
-            expected.scheme,
-            expected.hostname,
-            expected.port
-            if expected.port is not None
-            else (443 if expected.scheme == "https" else 80),
-        )
+        actual = _origin_key(origin)
+        base = urlsplit(str(request.base_url))
+        expected = _origin_key(f"{base.scheme}://{base.netloc}")
+        same = actual == expected or actual in trusted
     except ValueError:
         same = False
-    if not same or actual.path or actual.query or actual.fragment or actual.username:
-        raise AppError("CSRF_REJECTED", "浏览器请求来源不匹配，请从应用页面操作", 403)
+    if not same:
+        raise AppError(
+            "CSRF_REJECTED",
+            f"浏览器请求来源不匹配（来源 {origin[:200] or '缺失'}，应用地址 "
+            f"{str(request.base_url).rstrip('/')}）。请从应用页面操作；"
+            "如经反向代理或 Cloudflare Tunnel 访问，请在 APP_TRUSTED_ORIGINS 中配置访问地址",
+            403,
+        )
 
 
 def principal(
